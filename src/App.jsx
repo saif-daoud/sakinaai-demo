@@ -87,6 +87,8 @@ function mergeRuntimeModels(runtimeModels) {
 
 function App() {
   const fileInputRef = useRef(null);
+  const responseStreamTimerRef = useRef(null);
+  const streamingResponseRef = useRef(null);
   const [runtimeLoaded, setRuntimeLoaded] = useState(false);
   const [apiStatus, setApiStatus] = useState("Checking API connection...");
   const [expert, setExpert] = useState(() => loadJson(STORAGE_KEYS.expert, null));
@@ -107,6 +109,8 @@ function App() {
   const [preparedTranslation, setPreparedTranslation] = useState(null);
   const [showPreparedTranslation, setShowPreparedTranslation] = useState(false);
   const [translationBusy, setTranslationBusy] = useState(false);
+  const [responseStreaming, setResponseStreaming] = useState(false);
+  const [streamedResponse, setStreamedResponse] = useState("");
   const selectedModelInfo = useMemo(() => modelOptions.find((item) => item.key === selectedModel), [modelOptions, selectedModel]);
   const transcriptHasArabic = containsArabic(transcript);
   const requiresTranslation = selectedModelInfo?.language === "Fanar to English" && transcriptHasArabic;
@@ -115,7 +119,14 @@ function App() {
 
   useEffect(() => {
     document.title = "SakinaAI SOAP Demo";
+    return () => window.clearInterval(responseStreamTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    if (streamingResponseRef.current) {
+      streamingResponseRef.current.scrollTop = streamingResponseRef.current.scrollHeight;
+    }
+  }, [streamedResponse]);
 
   useEffect(() => {
     let cancelled = false;
@@ -196,6 +207,7 @@ function App() {
   }
 
   function logout() {
+    window.clearInterval(responseStreamTimerRef.current);
     localStorage.removeItem(STORAGE_KEYS.token);
     localStorage.removeItem(STORAGE_KEYS.expert);
     setExpert(null);
@@ -204,6 +216,8 @@ function App() {
     setShowTranslation(false);
     setPreparedTranslation(null);
     setShowPreparedTranslation(false);
+    setResponseStreaming(false);
+    setStreamedResponse("");
     setHistory([]);
     setModelOptions(MODEL_OPTIONS);
   }
@@ -238,6 +252,38 @@ function App() {
     setShowPreparedTranslation(false);
   }
 
+  function stopResponseStream() {
+    window.clearInterval(responseStreamTimerRef.current);
+    responseStreamTimerRef.current = null;
+    setResponseStreaming(false);
+    setStreamedResponse("");
+  }
+
+  function streamCompletedGeneration(nextGeneration) {
+    window.clearInterval(responseStreamTimerRef.current);
+    const text = JSON.stringify(nextGeneration?.output_json || {}, null, 2);
+    const intervalMs = 30;
+    const durationMs = Math.min(12000, Math.max(3500, Math.round(text.length * 0.7)));
+    const chunkSize = Math.max(2, Math.ceil(text.length / (durationMs / intervalMs)));
+    let cursor = 0;
+
+    setGeneration(nextGeneration);
+    setStreamedResponse("");
+    setResponseStreaming(true);
+    setStatus("Generation complete — streaming response...");
+
+    responseStreamTimerRef.current = window.setInterval(() => {
+      cursor = Math.min(text.length, cursor + chunkSize);
+      setStreamedResponse(text.slice(0, cursor));
+      if (cursor >= text.length) {
+        window.clearInterval(responseStreamTimerRef.current);
+        responseStreamTimerRef.current = null;
+        setResponseStreaming(false);
+        setStatus("Generation complete");
+      }
+    }, intervalMs);
+  }
+
   async function generateTranslation() {
     if (preparedTranslation) {
       setShowPreparedTranslation((current) => !current);
@@ -266,6 +312,7 @@ function App() {
   async function generateSoap() {
     if (!canGenerate) return;
     setBusy(true);
+    stopResponseStream();
     setStatus(
       requiresTranslation
         ? preparedTranslation
@@ -289,7 +336,6 @@ function App() {
         },
         { timeoutMs: 240000 },
       );
-      setGeneration(payload.generation);
       if (payload.generation?.translated_transcript) {
         setPreparedTranslation({
           text: payload.generation.translated_transcript,
@@ -298,7 +344,7 @@ function App() {
           translation_character_count: payload.generation.translated_transcript.length,
         });
       }
-      setStatus("Generation complete");
+      streamCompletedGeneration(payload.generation);
       await refreshHistory();
     } catch (error) {
       setStatus(error?.message || "Generation failed.");
@@ -463,6 +509,7 @@ function App() {
                   className="historyItem"
                   type="button"
                   onClick={() => {
+                    stopResponseStream();
                     const outputJson = item.output_json ? JSON.parse(item.output_json) : null;
                     setGeneration({
                       ...item,
@@ -574,7 +621,7 @@ function App() {
 
           {status && (
             <div className={status.toLowerCase().includes("failed") || status.toLowerCase().includes("unavailable") ? "statusBanner danger" : "statusBanner"}>
-              {busy || translationBusy ? <RefreshCw size={16} className="spin" /> : <CheckCircle2 size={16} />}
+              {busy || translationBusy || responseStreaming ? <RefreshCw size={16} className="spin" /> : <CheckCircle2 size={16} />}
               <span>{status}</span>
             </div>
           )}
@@ -586,7 +633,7 @@ function App() {
                   <div className="eyebrow">SOAP output</div>
                   <h1>{modelLabel(generation.model_key)}</h1>
                 </div>
-                <div className="headerActions">
+                {!responseStreaming && <div className="headerActions">
                   {generation.translated_with_fanar && generation.translated_transcript && (
                     <button
                       className="secondaryButton"
@@ -607,7 +654,7 @@ function App() {
                     <FileJson size={17} />
                     Export
                   </button>
-                </div>
+                </div>}
               </div>
 
               {showTranslation && generation.translated_transcript && (
@@ -623,7 +670,19 @@ function App() {
                 </section>
               )}
 
-              <SoapViewer output={generation.output_json} />
+              {responseStreaming ? (
+                <div className="streamingOutput" aria-live="polite" aria-label="Streaming SOAP response">
+                  <div className="streamingLabel">
+                    <span className="streamingDot" />
+                    Streaming response
+                  </div>
+                  <pre className="streamingResponse" ref={streamingResponseRef}>
+                    {streamedResponse}<span className="streamingCursor" aria-hidden="true" />
+                  </pre>
+                </div>
+              ) : (
+                <SoapViewer output={generation.output_json} />
+              )}
             </section>
           )}
         </section>

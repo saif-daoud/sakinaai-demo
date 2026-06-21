@@ -574,6 +574,68 @@ button {
   padding-top: 16px;
 }
 
+.streamingOutput {
+  display: grid;
+  gap: 10px;
+  padding-top: 16px;
+}
+
+.streamingLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--teal);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.streamingDot {
+  width: 8px;
+  height: 8px;
+  background: var(--teal);
+  border-radius: 50%;
+  box-shadow: 0 0 0 5px rgba(15, 118, 110, 0.12);
+  animation: streamPulse 1.2s ease-in-out infinite;
+}
+
+.streamingResponse {
+  max-height: 68vh;
+  overflow: auto;
+  margin: 0;
+  padding: 18px;
+  color: #203047;
+  background: linear-gradient(145deg, #fbfcfe, #f5faf9);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.streamingCursor {
+  display: inline-block;
+  width: 8px;
+  height: 1.15em;
+  margin-left: 2px;
+  vertical-align: -0.18em;
+  background: var(--teal);
+  animation: cursorBlink 0.8s steps(1) infinite;
+}
+
+@keyframes streamPulse {
+  50% {
+    opacity: 0.45;
+    transform: scale(0.78);
+  }
+}
+
+@keyframes cursorBlink {
+  50% {
+    opacity: 0;
+  }
+}
+
 .soapStack {
   display: grid;
   gap: 10px;
