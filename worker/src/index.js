@@ -69,6 +69,7 @@ const MODEL_REGISTRY = {
     provider: "hf",
     model: "aaditya/Llama3-OpenBioLLM-8B:featherless-ai",
     hf_task: "text-generation",
+    chat_template: "llama3_instruct",
     compact_default: true,
     translate_with_fanar: true,
     system_prompt: "You are an expert healthcare and biomedical assistant. Use precise medical terminology while staying faithful to the transcript.",
@@ -77,6 +78,7 @@ const MODEL_REGISTRY = {
     provider: "hf",
     model: "m42-health/Llama3-Med42-8B:featherless-ai",
     hf_task: "chat-completion",
+    chat_template: "llama3_instruct",
     compact_default: true,
     translate_with_fanar: true,
     system_prompt:
@@ -94,6 +96,7 @@ const MODEL_REGISTRY = {
     provider: "hf",
     model: "johnsnowlabs/JSL-MedLlama-3-8B-v2.0:featherless-ai",
     hf_task: "text-generation",
+    chat_template: "llama3_instruct",
     compact_default: true,
     translate_with_fanar: true,
     system_prompt: "You are a careful medical documentation assistant. Produce faithful clinical notes from the transcript only.",
@@ -591,8 +594,29 @@ function splitModelProvider(model, defaultProvider = "") {
   return [model.slice(0, index), model.slice(index + 1)];
 }
 
-function flattenMessagesForCompletion(chatMessages) {
-  return `${chatMessages.map((message) => `${String(message.role || "user").toUpperCase()}:\n${message.content || ""}`).join("\n\n")}\n\nASSISTANT:`;
+function messageContentText(content) {
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => (typeof item === "string" ? item : item?.text || ""))
+      .join("\n")
+      .trim();
+  }
+  return String(content || "");
+}
+
+function llama3InstructPrompt(chatMessages) {
+  return `${chatMessages
+    .map((message) => {
+      const role = ["system", "assistant"].includes(message.role) ? message.role : "user";
+      const prefix = role === "system" ? "<|begin_of_text|>" : "";
+      return `${prefix}<|start_header_id|>${role}<|end_header_id|>\n\n${messageContentText(message.content)}<|eot_id|>`;
+    })
+    .join("")}<|start_header_id|>assistant<|end_header_id|>\n\n`;
+}
+
+function flattenMessagesForCompletion(chatMessages, chatTemplate = "") {
+  if (chatTemplate === "llama3_instruct") return llama3InstructPrompt(chatMessages);
+  return `${chatMessages.map((message) => `${String(message.role || "user").toUpperCase()}:\n${messageContentText(message.content)}`).join("\n\n")}\n\nASSISTANT:`;
 }
 
 function parseLooseJson(text, label) {
@@ -870,7 +894,7 @@ async function callDedicatedHf(env, config, { chatMessages, maxTokens = 2048, te
   const payload = completionTask
     ? {
         model: config.model,
-        prompt: flattenMessagesForCompletion(chatMessages),
+        prompt: flattenMessagesForCompletion(chatMessages, config.chat_template || ""),
         max_tokens: maxTokens,
         temperature,
         stream: false,
@@ -890,10 +914,10 @@ async function callDedicatedHf(env, config, { chatMessages, maxTokens = 2048, te
   }
 }
 
-async function callHf(env, { model, chatMessages, maxTokens = 2048, temperature = 0, jsonMode = false, hfTask = "chat-completion" }) {
+async function callHf(env, { model, chatMessages, maxTokens = 2048, temperature = 0, jsonMode = false, hfTask = "chat-completion", chatTemplate = "" }) {
   if (!env.HF_API) throw new Error("HF_API Worker secret is missing");
   if (["text-generation", "completion", "completions"].includes(hfTask)) {
-    return callHfCompletion(env, { model, chatMessages, maxTokens, temperature });
+    return callHfCompletion(env, { model, chatMessages, maxTokens, temperature, chatTemplate });
   }
 
   const headers = {
@@ -914,7 +938,7 @@ async function callHf(env, { model, chatMessages, maxTokens = 2048, temperature 
   }
 }
 
-async function callHfCompletion(env, { model, chatMessages, maxTokens = 2048, temperature = 0 }) {
+async function callHfCompletion(env, { model, chatMessages, maxTokens = 2048, temperature = 0, chatTemplate = "" }) {
   const [baseModel, provider] = splitModelProvider(model, env.HF_TEXT_GENERATION_PROVIDER || "");
   if (!provider) throw new Error(`HF text-generation model '${model}' needs a provider suffix`);
 
@@ -924,7 +948,7 @@ async function callHfCompletion(env, { model, chatMessages, maxTokens = 2048, te
   };
   const payload = {
     model: baseModel,
-    prompt: flattenMessagesForCompletion(chatMessages),
+    prompt: flattenMessagesForCompletion(chatMessages, chatTemplate),
     max_tokens: maxTokens,
     temperature,
     stream: false,
@@ -947,7 +971,7 @@ async function callModel(env, config, { chatMessages, maxTokens, temperature = 0
     return callOpenAICompatible(env, { model: config.model, chatMessages, maxTokens, temperature, jsonMode });
   }
   if (config.provider === "hf") {
-    return callHf(env, { model: config.model, chatMessages, maxTokens, temperature, jsonMode, hfTask: config.hf_task || "chat-completion" });
+    return callHf(env, { model: config.model, chatMessages, maxTokens, temperature, jsonMode, hfTask: config.hf_task || "chat-completion", chatTemplate: config.chat_template || "" });
   }
   if (config.provider === "hf_dedicated") {
     return callDedicatedHf(env, config, { chatMessages, maxTokens, temperature, jsonMode });
