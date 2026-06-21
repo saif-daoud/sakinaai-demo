@@ -32,9 +32,9 @@ HF_API=<hugging-face-key>
 OPENROUTER_API_KEYS=<key1>,<key2>,<key3>
 ```
 
-For a quick local-only access gate you may set `ALLOW_DEFAULT_ACCESS_CODE=1`,
-which enables the development code hash already embedded in the Worker source.
-Do not use that flag for the deployed demo.
+For quick local-only testing you may set `ALLOW_DEFAULT_ACCESS_CODE=1` and
+`ALLOW_DEFAULT_TOKEN_SECRET=1`, which enables development fallbacks embedded in
+the Worker source. Do not use those flags for the deployed demo.
 
 ## GitHub Secrets
 

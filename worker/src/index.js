@@ -226,16 +226,23 @@ async function hmacSign(secret, data) {
   return base64UrlEncode(new Uint8Array(signature));
 }
 
+function tokenSecret(env) {
+  const secret = String(env.TOKEN_SECRET || "");
+  if (secret) return secret;
+  if (String(env.ALLOW_DEFAULT_TOKEN_SECRET || "") === "1") return "local-dev-secret";
+  throw new Error("TOKEN_SECRET is not configured");
+}
+
 async function makeToken(env, payload) {
   const body = b64Json(payload);
-  const signature = await hmacSign(env.TOKEN_SECRET || "local-dev-secret", body);
+  const signature = await hmacSign(tokenSecret(env), body);
   return `${body}.${signature}`;
 }
 
 async function verifyToken(env, token) {
   const [body, signature] = String(token || "").split(".");
   if (!body || !signature) throw new Error("Bad token");
-  const expected = await hmacSign(env.TOKEN_SECRET || "local-dev-secret", body);
+  const expected = await hmacSign(tokenSecret(env), body);
   if (signature !== expected) throw new Error("Bad token");
   const payload = fromB64Json(body);
   if (payload.exp && Date.now() > payload.exp) throw new Error("Expired token");
