@@ -61,6 +61,7 @@ jobs:
 
           WORKER_NAME="sakinaai-demo-api"
           DB_NAME="sakinaai_demo"
+          QUEUE_NAME="sakinaai-generation-jobs"
           WORKER_URL=""
 
           if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ] || [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
@@ -141,6 +142,7 @@ jobs:
           put_secret OPENAI_API_KEY "${OPENAI_API_KEY:-}"
           put_secret OPENAI_COMPATIBLE_ENDPOINT "${OPENAI_COMPATIBLE_ENDPOINT:-}"
 
+          (cd worker && npx wrangler queues create "$QUEUE_NAME") || true
           (cd worker && npx wrangler d1 migrations apply "$DB_NAME" --remote)
           (cd worker && npx wrangler deploy 2>&1 | tee ../worker-deploy.log)
 

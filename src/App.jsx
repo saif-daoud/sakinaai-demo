@@ -26,6 +26,7 @@ const STORAGE_KEYS = {
   expert: "sakina_demo_expert",
   lastTranscript: "sakina_demo_last_transcript",
   lastModel: "sakina_demo_last_model",
+  activeGeneration: "sakina_demo_active_generation",
 };
 
 const MODEL_OPTIONS = [
@@ -104,6 +105,11 @@ function isProblemStatus(text) {
   ].some((needle) => lower.includes(needle));
 }
 
+function isProgressStatus(text) {
+  const lower = String(text || "").toLowerCase();
+  return ["generating", "translating", "running", "has started", "still running"].some((needle) => lower.includes(needle));
+}
+
 function friendlyGenerationStatus(error) {
   const message = String(error?.message || "").trim();
   const lower = message.toLowerCase();
@@ -137,8 +143,29 @@ function friendlyTranslationStatus(error) {
   return TRANSLATION_FRIENDLY_ERROR;
 }
 
+function parseHistoryOutput(item) {
+  if (!item?.output_json) return null;
+  if (typeof item.output_json !== "string") return item.output_json;
+  try {
+    return JSON.parse(item.output_json);
+  } catch {
+    return null;
+  }
+}
+
+function statusText(status) {
+  return status === "running" ? "running" : status || "";
+}
+
+function statusClass(status) {
+  if (status === "completed") return "okText";
+  if (status === "running") return "warningText";
+  return "dangerText";
+}
+
 function App() {
   const fileInputRef = useRef(null);
+  const historyPanelRef = useRef(null);
   const responseStreamTimerRef = useRef(null);
   const streamingResponseRef = useRef(null);
   const [runtimeLoaded, setRuntimeLoaded] = useState(false);
@@ -163,11 +190,13 @@ function App() {
   const [translationBusy, setTranslationBusy] = useState(false);
   const [responseStreaming, setResponseStreaming] = useState(false);
   const [streamedResponse, setStreamedResponse] = useState("");
+  const [activeGenerationId, setActiveGenerationId] = useState(() => localStorage.getItem(STORAGE_KEYS.activeGeneration) || "");
   const selectedModelInfo = useMemo(() => modelOptions.find((item) => item.key === selectedModel), [modelOptions, selectedModel]);
   const transcriptHasArabic = containsArabic(transcript);
   const requiresTranslation = selectedModelInfo?.language === "Fanar to English" && transcriptHasArabic;
   const canGenerate = apiEnabled() && token && transcript.trim() && selectedModelInfo?.enabled && !busy && !translationBusy;
   const canGenerateTranslation = apiEnabled() && token && transcript.trim() && requiresTranslation && !busy && !translationBusy;
+  const runningHistoryCount = history.filter((item) => item.status === "running").length;
 
   useEffect(() => {
     document.title = "SakinaAI SOAP Demo";
@@ -209,12 +238,50 @@ function App() {
   }, [selectedModel]);
 
   useEffect(() => {
+    if (activeGenerationId) {
+      localStorage.setItem(STORAGE_KEYS.activeGeneration, activeGenerationId);
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.activeGeneration);
+    }
+  }, [activeGenerationId]);
+
+  useEffect(() => {
     if (runtimeLoaded && token && apiEnabled()) {
       void refreshModels();
       void refreshHistory();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runtimeLoaded, token]);
+
+  useEffect(() => {
+    if (!runtimeLoaded || !token || !apiEnabled() || runningHistoryCount === 0) return undefined;
+
+    let cancelled = false;
+    const poll = async () => {
+      const nextHistory = await refreshHistory();
+      if (cancelled || !Array.isArray(nextHistory)) return;
+      const active = activeGenerationId
+        ? nextHistory.find((item) => item.id === activeGenerationId)
+        : nextHistory.find((item) => item.status === "running");
+      if (!active) return;
+
+      if (active.status === "completed") {
+        setActiveGenerationId("");
+        showGeneration(active, { stream: true });
+      } else if (active.status === "failed") {
+        setActiveGenerationId("");
+        showGeneration(active);
+      }
+    };
+
+    const timer = window.setInterval(() => void poll(), 5000);
+    void poll();
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runtimeLoaded, token, activeGenerationId, runningHistoryCount]);
 
   async function submitAccess(event) {
     event.preventDefault();
@@ -272,6 +339,58 @@ function App() {
     setStreamedResponse("");
     setHistory([]);
     setModelOptions(MODEL_OPTIONS);
+    setActiveGenerationId("");
+  }
+
+  function showGeneration(item, options = {}) {
+    if (!item) return;
+    stopResponseStream();
+    const outputJson = parseHistoryOutput(item);
+    const nextGeneration = {
+      ...item,
+      output_json: outputJson,
+    };
+
+    setShowTranslation(false);
+    setPreparedTranslation(
+      item.translated_transcript
+        ? {
+            text: item.translated_transcript,
+            source_sha256: outputJson?.metadata?.source_sha256 || "",
+            source_character_count: outputJson?.metadata?.source_character_count || item.transcript_text?.length || 0,
+            translation_character_count: item.translated_transcript.length,
+          }
+        : null,
+    );
+    setShowPreparedTranslation(false);
+    setSelectedModel(item.model_key || selectedModel);
+    if (item.transcript_text) setTranscript(item.transcript_text);
+
+    if (item.status === "running") {
+      setGeneration(nextGeneration);
+      setActiveGenerationId(item.id || "");
+      setStatus("SOAP generation is still running. You can leave this page and return later.");
+      return;
+    }
+
+    if (item.status === "failed") {
+      setGeneration(nextGeneration);
+      setStatus(item.error || GENERATION_FRIENDLY_ERROR);
+      return;
+    }
+
+    if (options.stream && outputJson) {
+      streamCompletedGeneration(nextGeneration);
+    } else {
+      setGeneration(nextGeneration);
+      setStatus("Generation complete");
+    }
+  }
+
+  async function openHistory() {
+    await refreshHistory();
+    historyPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    historyPanelRef.current?.focus({ preventScroll: true });
   }
 
   async function refreshModels(explicitToken = token) {
@@ -285,12 +404,15 @@ function App() {
   }
 
   async function refreshHistory(explicitToken = token) {
-    if (!explicitToken || !apiEnabled()) return;
+    if (!explicitToken || !apiEnabled()) return null;
     try {
       const payload = await postJSON("/api/history", { token: explicitToken }, { timeoutMs: 30000 });
-      setHistory(Array.isArray(payload.generations) ? payload.generations : []);
+      const nextHistory = Array.isArray(payload.generations) ? payload.generations : [];
+      setHistory(nextHistory);
+      return nextHistory;
     } catch (error) {
       setStatus(`History unavailable: ${error?.message || "request failed"}`);
+      return null;
     }
   }
 
@@ -383,20 +505,30 @@ function App() {
           model_key: selectedModel,
           transcript,
           input_name: inputName,
+          page_url: window.location.href,
           translated_transcript: requiresTranslation ? preparedTranslation?.text || "" : "",
           translation_source_sha256: requiresTranslation ? preparedTranslation?.source_sha256 || "" : "",
         },
         { timeoutMs: 240000 },
       );
-      if (payload.generation?.translated_transcript) {
+      const nextGeneration = payload.generation;
+      if (nextGeneration?.status === "running") {
+        setActiveGenerationId(nextGeneration.id || "");
+        setGeneration(nextGeneration);
+        setStatus("SOAP generation has started. You can leave this page and return later.");
+        await refreshHistory();
+        return;
+      }
+
+      if (nextGeneration?.translated_transcript) {
         setPreparedTranslation({
-          text: payload.generation.translated_transcript,
-          source_sha256: payload.generation.output_json?.metadata?.source_sha256 || "",
-          source_character_count: payload.generation.output_json?.metadata?.source_character_count || transcript.length,
-          translation_character_count: payload.generation.translated_transcript.length,
+          text: nextGeneration.translated_transcript,
+          source_sha256: nextGeneration.output_json?.metadata?.source_sha256 || "",
+          source_character_count: nextGeneration.output_json?.metadata?.source_character_count || transcript.length,
+          translation_character_count: nextGeneration.translated_transcript.length,
         });
       }
-      streamCompletedGeneration(payload.generation);
+      streamCompletedGeneration(nextGeneration);
       await refreshHistory();
     } catch (error) {
       setStatus(friendlyGenerationStatus(error));
@@ -493,7 +625,7 @@ function App() {
           </div>
         </div>
         <nav className="topbarActions" aria-label="Primary">
-          <button className="navButton" type="button" onClick={() => void refreshHistory()}>
+          <button className="navButton" type="button" onClick={() => void openHistory()}>
             <Database size={17} />
             History
           </button>
@@ -543,7 +675,7 @@ function App() {
             </div>
           </section>
 
-          <section className="panelBlock">
+          <section className="panelBlock historyPanel" ref={historyPanelRef} tabIndex={-1}>
             <div className="sectionHeader">
               <div>
                 <div className="eyebrow">History</div>
@@ -558,34 +690,13 @@ function App() {
               {history.map((item) => (
                 <button
                   key={item.id}
-                  className="historyItem"
+                  className={`historyItem ${item.status === "running" ? "running" : ""}`}
                   type="button"
-                  onClick={() => {
-                    stopResponseStream();
-                    const outputJson = item.output_json ? JSON.parse(item.output_json) : null;
-                    setGeneration({
-                      ...item,
-                      output_json: outputJson,
-                    });
-                    setShowTranslation(false);
-                    setPreparedTranslation(
-                      item.translated_transcript
-                        ? {
-                            text: item.translated_transcript,
-                            source_sha256: outputJson?.metadata?.source_sha256 || "",
-                            source_character_count: outputJson?.metadata?.source_character_count || item.transcript_text?.length || 0,
-                            translation_character_count: item.translated_transcript.length,
-                          }
-                        : null,
-                    );
-                    setShowPreparedTranslation(false);
-                    setSelectedModel(item.model_key || selectedModel);
-                    if (item.transcript_text) setTranscript(item.transcript_text);
-                  }}
+                  onClick={() => showGeneration(item)}
                 >
                   <strong>{modelLabel(item.model_key)}</strong>
                   <span>{formatTime(item.created_at)}</span>
-                  <small className={item.status === "completed" ? "okText" : "dangerText"}>{item.status}</small>
+                  <small className={statusClass(item.status)}>{statusText(item.status)}</small>
                 </button>
               ))}
             </div>
@@ -673,7 +784,7 @@ function App() {
 
           {status && (
             <div className={isProblemStatus(status) ? "statusBanner danger" : "statusBanner"}>
-              {busy || translationBusy || responseStreaming ? (
+              {busy || translationBusy || responseStreaming || isProgressStatus(status) ? (
                 <RefreshCw size={16} className="spin" />
               ) : isProblemStatus(status) ? (
                 <AlertCircle size={16} />

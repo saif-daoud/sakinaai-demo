@@ -8,6 +8,17 @@ binding = "DB"
 database_name = "sakinaai_demo"
 database_id = "replace-with-cloudflare-d1-database-id"
 
+[[queues.producers]]
+binding = "GENERATION_QUEUE"
+queue = "sakinaai-generation-jobs"
+
+[[queues.consumers]]
+queue = "sakinaai-generation-jobs"
+max_batch_size = 1
+max_batch_timeout = 1
+max_retries = 2
+max_concurrency = 1
+
 [vars]
 ALLOWED_ORIGINS = "https://saif-daoud.github.io,http://127.0.0.1:5173,http://localhost:5173"
 ACCESS_CODE_HASHES = "cd8c2de382d3bab299fa20c4dba2a2c43adbda8dccae9abc6f95a985f69fa600"

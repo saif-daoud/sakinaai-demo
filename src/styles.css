@@ -361,6 +361,15 @@ button {
   padding: 16px;
 }
 
+.historyPanel {
+  scroll-margin-top: 110px;
+}
+
+.historyPanel:focus {
+  outline: 3px solid rgba(15, 118, 110, 0.16);
+  outline-offset: 4px;
+}
+
 .sectionHeader,
 .inputHeader,
 .resultHeader {
@@ -428,6 +437,11 @@ button {
   background: #e7f5f1;
   border-color: #9bd5c9;
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.1);
+}
+
+.historyItem.running {
+  background: #fff7db;
+  border-color: #f1d88b;
 }
 
 .modelCard strong,
@@ -738,6 +752,10 @@ button {
 
 .okText {
   color: var(--green) !important;
+}
+
+.warningText {
+  color: #7c5800 !important;
 }
 
 .dangerText {

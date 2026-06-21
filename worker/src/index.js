@@ -690,6 +690,9 @@ function expertFacingGenerationError(error) {
   if (lower.includes("transcript is empty")) {
     return "Please add a transcript before generating the SOAP note.";
   }
+  if (lower.includes("generation queue") || lower.includes("start the soap generation")) {
+    return "We could not start the SOAP generation. Please try again.";
+  }
   if (lower.includes("unknown model") || lower.includes("unsupported provider") || lower.includes("not currently served") || lower.includes("not available")) {
     return "This model is not available in the demo right now. Please choose another model.";
   }
@@ -1142,6 +1145,57 @@ async function insertGeneration(env, row) {
     .run();
 }
 
+async function getGeneration(env, generationId) {
+  const id = cleanText(generationId, 80);
+  if (!id) return null;
+  return env.DB
+    .prepare(
+      `SELECT id, expert_uid, expert_email, model_key, provider, model_name,
+        input_name, input_language, transcript_text, translated_transcript,
+        translated_with_fanar, output_json, raw_output, status, error,
+        user_agent, page_url, created_at, completed_at
+       FROM generations
+       WHERE id = ?`,
+    )
+    .bind(id)
+    .first();
+}
+
+async function updateGenerationCompleted(env, generationId, result) {
+  await env.DB
+    .prepare(
+      `UPDATE generations
+       SET model_key = ?, provider = ?, model_name = ?, input_language = ?,
+           translated_transcript = ?, translated_with_fanar = ?, output_json = ?,
+           raw_output = ?, status = 'completed', error = NULL, completed_at = ?
+       WHERE id = ?`,
+    )
+    .bind(
+      result.modelKey,
+      result.provider,
+      result.modelName,
+      result.inputLanguage,
+      result.translatedTranscript || null,
+      result.translatedWithFanar ? 1 : 0,
+      JSON.stringify(result.outputJson),
+      result.rawOutput,
+      new Date().toISOString(),
+      generationId,
+    )
+    .run();
+}
+
+async function updateGenerationFailed(env, generationId, error) {
+  await env.DB
+    .prepare(
+      `UPDATE generations
+       SET status = 'failed', error = ?, completed_at = ?
+       WHERE id = ?`,
+    )
+    .bind(cleanText(error?.message || "Generation failed", 5000), new Date().toISOString(), generationId)
+    .run();
+}
+
 function clientGeneration(row) {
   return {
     id: row.id,
@@ -1160,6 +1214,27 @@ function clientGeneration(row) {
     created_at: row.created_at,
     completed_at: row.completed_at,
   };
+}
+
+async function processQueuedGeneration(env, job) {
+  const generationId = cleanText(job?.generation_id, 80);
+  if (!generationId) return;
+
+  const row = await getGeneration(env, generationId);
+  if (!row || row.status !== "running") return;
+
+  try {
+    const result = await runGeneration(env, {
+      transcript: row.transcript_text,
+      inputName: row.input_name || "uploaded_transcript.txt",
+      modelKey: row.model_key,
+      pretranslatedTranscript: row.translated_transcript || "",
+      translationSourceSha256: cleanText(job.translation_source_sha256, 128),
+    });
+    await updateGenerationCompleted(env, generationId, result);
+  } catch (error) {
+    await updateGenerationFailed(env, generationId, error);
+  }
 }
 
 async function listHistory(env, expertUid) {
@@ -1204,10 +1279,17 @@ export const testSupport = {
   publicModelRegistry,
   runGeneration,
   runTranslation,
+  processQueuedGeneration,
   splitKeys,
 };
 
 export default {
+  async queue(batch, env) {
+    for (const message of batch.messages) {
+      await processQueuedGeneration(env, message.body || {});
+    }
+  },
+
   async fetch(request, env) {
     const origin = request.headers.get("Origin") || "";
     const headers = corsHeaders(env, origin);
@@ -1274,65 +1356,42 @@ export default {
         const createdAt = new Date().toISOString();
 
         if (!transcript) throw new Error("Transcript is empty");
+        const [resolvedKey, config] = resolveModel(body.model_key, env);
+        const sourceHasArabic = containsArabic(transcript);
+        const row = {
+          id: generationId,
+          expert_uid: String(payload.expert_uid || ""),
+          expert_email: String(payload.email || ""),
+          model_key: resolvedKey,
+          provider: config.provider || "unknown",
+          model_name: config.model || "unknown",
+          input_name: inputName,
+          input_language: config.translate_with_fanar && sourceHasArabic ? "English" : sourceHasArabic ? "Arabic" : "English",
+          transcript_text: transcript,
+          translated_transcript: pretranslatedTranscript || null,
+          translated_with_fanar: Boolean(pretranslatedTranscript),
+          output_json: null,
+          raw_output: null,
+          status: "running",
+          error: null,
+          user_agent: cleanText(request.headers.get("user-agent"), 800),
+          page_url: pageUrl,
+          created_at: createdAt,
+          completed_at: null,
+        };
 
         try {
-          const result = await runGeneration(env, {
-            transcript,
-            inputName,
-            modelKey: body.model_key,
-            pretranslatedTranscript,
-            translationSourceSha256,
+          await insertGeneration(env, row);
+          if (!env.GENERATION_QUEUE) throw new Error("Generation queue is not configured");
+          await env.GENERATION_QUEUE.send({
+            generation_id: generationId,
+            translation_source_sha256: translationSourceSha256,
           });
-          const completedAt = new Date().toISOString();
-          const row = {
-            id: generationId,
-            expert_uid: String(payload.expert_uid || ""),
-            expert_email: String(payload.email || ""),
-            model_key: result.modelKey,
-            provider: result.provider,
-            model_name: result.modelName,
-            input_name: inputName,
-            input_language: result.inputLanguage,
-            transcript_text: transcript,
-            translated_transcript: result.translatedTranscript || null,
-            translated_with_fanar: result.translatedWithFanar,
-            output_json: JSON.stringify(result.outputJson),
-            raw_output: result.rawOutput,
-            status: "completed",
-            error: null,
-            user_agent: cleanText(request.headers.get("user-agent"), 800),
-            page_url: pageUrl,
-            created_at: createdAt,
-            completed_at: completedAt,
-          };
-          await insertGeneration(env, row);
-          return json({ ok: true, generation: clientGeneration(row) }, 200, headers);
+          return json({ ok: true, queued: true, generation: clientGeneration(row) }, 202, headers);
         } catch (error) {
-          const modelKey = cleanText(body.model_key, 80);
-          const config = MODEL_REGISTRY[modelKey] || {};
-          const row = {
-            id: generationId,
-            expert_uid: String(payload.expert_uid || ""),
-            expert_email: String(payload.email || ""),
-            model_key: modelKey || "unknown",
-            provider: config.provider || "unknown",
-            model_name: config.model || "unknown",
-            input_name: inputName,
-            input_language: containsArabic(transcript) ? "Arabic" : "Unknown",
-            transcript_text: transcript,
-            translated_transcript: null,
-            translated_with_fanar: false,
-            output_json: null,
-            raw_output: null,
-            status: "failed",
-            error: cleanText(error?.message || "Generation failed", 5000),
-            user_agent: cleanText(request.headers.get("user-agent"), 800),
-            page_url: pageUrl,
-            created_at: createdAt,
-            completed_at: new Date().toISOString(),
-          };
-          await insertGeneration(env, row);
-          return json({ error: expertFacingGenerationError(error), generation: clientGeneration(row) }, 500, headers);
+          await updateGenerationFailed(env, generationId, error);
+          const failedRow = (await getGeneration(env, generationId)) || { ...row, status: "failed", error: cleanText(error?.message || "Generation failed", 5000) };
+          return json({ error: expertFacingGenerationError(error), generation: clientGeneration(failedRow) }, 500, headers);
         }
       }
 
