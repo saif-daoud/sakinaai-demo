@@ -14,60 +14,62 @@ const MODEL_REGISTRY = {
     model: "Fanar",
     display_model: "Fanar-C-2-27B",
     translate_with_fanar: false,
-    system_prompt: "You are a careful Arabic-English clinical documentation assistant. Produce faithful SOAP notes from the provided transcript only.",
   },
   allam: {
     provider: "hf",
     model: "humain-ai/ALLaM-7B-Instruct-preview",
+    compact_default: true,
     translate_with_fanar: false,
     disabled_reason: "The exact Hugging Face repo is not currently served by an enabled Inference Provider.",
-    system_prompt: "You are a careful Arabic-English clinical documentation assistant. Produce faithful SOAP notes from the provided transcript only.",
   },
   acegpt: {
     provider: "hf",
     model: "FreedomIntelligence/AceGPT-v2-8B-Chat:featherless-ai",
     hf_task: "text-generation",
     translate_with_fanar: false,
-    system_prompt: "You are a careful Arabic-English clinical documentation assistant. Produce faithful SOAP notes from the provided transcript only.",
   },
   falcon_h1: {
     provider: "hf",
     model: "tiiuae/Falcon-H1-3B-Instruct",
+    compact_default: true,
     translate_with_fanar: false,
     disabled_reason: "The exact Hugging Face repo is not currently served by an enabled Inference Provider.",
-    system_prompt: "You are a careful multilingual clinical documentation assistant. Produce faithful SOAP notes from the provided transcript only.",
   },
   gemma4: {
     provider: "openrouter",
     model: "google/gemma-4-31b-it:free",
+    compact_default: true,
     translate_with_fanar: false,
-    system_prompt: "You are a careful multilingual clinical documentation assistant. Produce faithful SOAP notes from the provided transcript only.",
   },
   bimedix2_bi: {
     provider: "hf",
     model: "MBZUAI/BiMediX2-8B-Bi",
+    compact_default: true,
     translate_with_fanar: false,
     disabled_reason: "The exact Hugging Face repo is not currently served by an enabled Inference Provider.",
-    system_prompt: "You are a careful bilingual Arabic-English medical documentation assistant. Produce faithful clinical notes from the provided transcript only.",
+    system_prompt: "You are a careful bilingual Arabic-English medical documentation assistant. Produce faithful clinical notes from the transcript only.",
   },
   bimedix2_hf: {
     provider: "hf",
     model: "MBZUAI/BiMediX2-8B-hf",
+    compact_default: true,
     translate_with_fanar: true,
     disabled_reason: "The exact Hugging Face repo is not currently served by an enabled Inference Provider.",
-    system_prompt: "You are a careful medical documentation assistant. Produce faithful clinical notes from the provided transcript only.",
+    system_prompt: "You are a careful medical documentation assistant. Produce faithful clinical notes from the transcript only.",
   },
   medgemma_4b: {
     provider: "hf",
     model: "google/medgemma-4b-it",
+    compact_default: true,
     translate_with_fanar: true,
     disabled_reason: "The exact Hugging Face repo is not currently served by an enabled Inference Provider.",
-    system_prompt: "You are a careful medical documentation assistant. Produce faithful clinical notes from the provided transcript only.",
+    system_prompt: "You are a careful medical documentation assistant. Produce faithful clinical notes from the transcript only.",
   },
   openbiollm_8b: {
     provider: "hf",
     model: "aaditya/Llama3-OpenBioLLM-8B:featherless-ai",
     hf_task: "text-generation",
+    compact_default: true,
     translate_with_fanar: true,
     system_prompt: "You are an expert healthcare and biomedical assistant. Use precise medical terminology while staying faithful to the transcript.",
   },
@@ -75,95 +77,100 @@ const MODEL_REGISTRY = {
     provider: "hf",
     model: "m42-health/Llama3-Med42-8B:featherless-ai",
     hf_task: "chat-completion",
+    compact_default: true,
     translate_with_fanar: true,
     system_prompt:
-      "You are a helpful, respectful and honest medical assistant. Produce faithful clinical documentation from the provided transcript only. If information is missing, do not invent it.",
+      "You are a helpful, respectful and honest medical assistant. Always answer as helpfully as possible while staying safe. For this task, produce faithful clinical documentation from the provided transcript only. If information is missing, do not invent it.",
   },
   biomistral_7b: {
     provider: "hf",
     model: "BioMistral/BioMistral-7B",
+    compact_default: true,
     translate_with_fanar: true,
     disabled_reason: "The exact Hugging Face repo is not currently served by an enabled Inference Provider.",
-    system_prompt: "You are a careful biomedical documentation assistant. Produce faithful clinical notes from the provided transcript only.",
+    system_prompt: "You are a careful biomedical documentation assistant. Produce faithful clinical notes from the transcript only.",
   },
   jsl_medllama_8b: {
     provider: "hf",
     model: "johnsnowlabs/JSL-MedLlama-3-8B-v2.0:featherless-ai",
     hf_task: "text-generation",
+    compact_default: true,
     translate_with_fanar: true,
-    system_prompt: "You are a careful medical documentation assistant. Produce faithful clinical notes from the provided transcript only.",
+    system_prompt: "You are a careful medical documentation assistant. Produce faithful clinical notes from the transcript only.",
   },
   gpt4_1: {
     provider: "openrouter",
     model: "openai/gpt-4.1",
     min_smoke_tokens: 16,
     translate_with_fanar: true,
-    system_prompt: "You are a careful medical documentation assistant. Produce faithful clinical notes from the provided transcript only.",
   },
   deepseek_v32: {
     provider: "openrouter",
     model: "deepseek/deepseek-v3.2",
     translate_with_fanar: true,
-    system_prompt: "You are a careful medical documentation assistant. Produce faithful clinical notes from the provided transcript only.",
   },
   llama_33_70b: {
     provider: "openrouter",
     model: "meta-llama/llama-3.3-70b-instruct",
     translate_with_fanar: true,
-    system_prompt: "You are a careful medical documentation assistant. Produce faithful clinical notes from the provided transcript only.",
   },
 };
 
-const SOAP_TEMPLATE = {
-  conversation_summary: "",
+const JSON_SCHEMA_EXAMPLE = {
+  conversation_summary:
+    "Plain-text English summary of the conversation in 1 to 2 concise paragraphs. Include the reason for the visit, main concerns, clinically relevant context, what the clinician did, and any agreed next steps. Do not use bullet points here.",
   medical_notes_soap: {
     subjective: {
-      chief_complaint_or_reason_for_visit: "",
+      chief_complaint_or_reason_for_visit: "Patient/client's main stated reason for the visit, in English. Use 'Not mentioned' if absent.",
       history_of_present_issue: {
-        onset_or_duration: "",
-        course_or_progression: "",
-        triggers_or_stressors: [],
-        associated_symptoms_or_experiences: [],
-        functional_impact: "",
+        onset_or_duration: "When the issue started or how long it has been present. Use 'Not mentioned' if absent.",
+        course_or_progression: "Whether symptoms improved, worsened, fluctuated, etc. Use 'Not mentioned' if absent.",
+        triggers_or_stressors: ["Only explicitly mentioned triggers/stressors; otherwise empty list."],
+        associated_symptoms_or_experiences: ["Symptoms/experiences reported by the patient/client."],
+        functional_impact: "Impact on sleep, study, work, relationships, daily life, etc. Use 'Not mentioned' if absent.",
       },
-      reported_symptoms_or_experiences: [],
-      patient_goals_or_requests: [],
-      relevant_personal_social_family_context: [],
-      medications_substances_or_treatments_mentioned: [],
-      patient_quotes_translated_to_english: [],
+      reported_symptoms_or_experiences: ["symptom or experience 1"],
+      patient_goals_or_requests: ["goal or request 1"],
+      relevant_personal_social_family_context: ["Only explicitly mentioned context; otherwise empty list."],
+      medications_substances_or_treatments_mentioned: ["Only if mentioned; otherwise empty list."],
+      patient_quotes_translated_to_english: ["Short translated quote if useful and explicitly present."],
     },
     objective: {
-      observations_from_session: [],
+      observations_from_session: [
+        "Observable behavior, affect, speech, engagement, or clinician-observed information only. Do not infer beyond the transcript.",
+      ],
       mental_status_or_clinical_observations_if_present: {
-        appearance_behavior: "",
-        speech: "",
-        mood_affect: "",
-        thought_process_content: "",
-        orientation_cognition: "",
-        insight_judgment: "",
+        appearance_behavior: "Only if present; otherwise Not mentioned.",
+        speech: "Only if present; otherwise Not mentioned.",
+        mood_affect: "Only if present; otherwise Not mentioned.",
+        thought_process_content: "Only if present; otherwise Not mentioned.",
+        orientation_cognition: "Only if present; otherwise Not mentioned.",
+        insight_judgment: "Only if present; otherwise Not mentioned.",
       },
-      tests_scales_or_measurements_mentioned: [],
+      tests_scales_or_measurements_mentioned: ["Only if mentioned; otherwise empty list."],
     },
     assessment: {
-      clinical_impression_summary: "",
-      possible_diagnoses_or_conditions_mentioned: [],
-      severity_or_functional_impact_if_present: "",
+      clinical_impression_summary: "Brief clinical impression supported only by the transcript. Do not invent diagnoses or clinical labels.",
+      possible_diagnoses_or_conditions_mentioned: [
+        "Only diagnoses/conditions explicitly mentioned in the transcript; otherwise empty list.",
+      ],
+      severity_or_functional_impact_if_present: "Only if supported by transcript; otherwise Not mentioned.",
       risk_assessment_if_present: {
         risk_or_safety_discussed: false,
-        risk_type: [],
-        details: "",
-        protective_factors_if_present: [],
+        risk_type: ["Only explicitly discussed risk types; otherwise empty list."],
+        details: "Only include details if explicitly present. Otherwise write: Not mentioned.",
+        protective_factors_if_present: ["Only if mentioned; otherwise empty list."],
       },
-      strengths_or_resources_if_present: [],
-      uncertainties_or_missing_information: [],
+      strengths_or_resources_if_present: ["Only if mentioned; otherwise empty list."],
+      uncertainties_or_missing_information: ["Important missing information that would be needed for a real clinical note."],
     },
     plan: {
-      interventions_discussed_or_provided: [],
-      homework_or_between_session_tasks: [],
-      follow_up_plan: "",
-      referrals_or_escalation_if_present: [],
-      patient_education_or_advice_given: [],
-      items_to_monitor: [],
+      interventions_discussed_or_provided: ["intervention 1"],
+      homework_or_between_session_tasks: ["homework 1, only if explicitly mentioned"],
+      follow_up_plan: "Follow-up timing or next steps if mentioned; otherwise Not mentioned.",
+      referrals_or_escalation_if_present: ["Only if mentioned; otherwise empty list."],
+      patient_education_or_advice_given: ["advice 1"],
+      items_to_monitor: ["item 1"],
       documentation_caution: "Generated from a transcript by an LLM; must be reviewed and corrected by a qualified human clinician.",
     },
   },
@@ -174,6 +181,69 @@ const SOAP_TEMPLATE = {
     note: "Generated by an LLM from a simulated transcript; requires human clinical review.",
   },
 };
+
+function buildEmptyJsonTemplate(sourceFile, sourceLanguage) {
+  return {
+    conversation_summary: "",
+    medical_notes_soap: {
+      subjective: {
+        chief_complaint_or_reason_for_visit: "",
+        history_of_present_issue: {
+          onset_or_duration: "",
+          course_or_progression: "",
+          triggers_or_stressors: [],
+          associated_symptoms_or_experiences: [],
+          functional_impact: "",
+        },
+        reported_symptoms_or_experiences: [],
+        patient_goals_or_requests: [],
+        relevant_personal_social_family_context: [],
+        medications_substances_or_treatments_mentioned: [],
+        patient_quotes_translated_to_english: [],
+      },
+      objective: {
+        observations_from_session: [],
+        mental_status_or_clinical_observations_if_present: {
+          appearance_behavior: "",
+          speech: "",
+          mood_affect: "",
+          thought_process_content: "",
+          orientation_cognition: "",
+          insight_judgment: "",
+        },
+        tests_scales_or_measurements_mentioned: [],
+      },
+      assessment: {
+        clinical_impression_summary: "",
+        possible_diagnoses_or_conditions_mentioned: [],
+        severity_or_functional_impact_if_present: "",
+        risk_assessment_if_present: {
+          risk_or_safety_discussed: false,
+          risk_type: [],
+          details: "",
+          protective_factors_if_present: [],
+        },
+        strengths_or_resources_if_present: [],
+        uncertainties_or_missing_information: [],
+      },
+      plan: {
+        interventions_discussed_or_provided: [],
+        homework_or_between_session_tasks: [],
+        follow_up_plan: "",
+        referrals_or_escalation_if_present: [],
+        patient_education_or_advice_given: [],
+        items_to_monitor: [],
+        documentation_caution: "Generated from a transcript by an LLM; must be reviewed and corrected by a qualified human clinician.",
+      },
+    },
+    metadata: {
+      source_file: sourceFile,
+      language_of_source: sourceLanguage,
+      output_language: "English",
+      note: "Generated by an LLM from a simulated transcript; requires human clinical review.",
+    },
+  };
+}
 
 function allowedOrigins(env) {
   return String(env.ALLOWED_ORIGINS || "")
@@ -330,13 +400,12 @@ ${transcript}
 `.trim();
 }
 
-function buildSoapPrompt(transcript, sourceFile, transcriptLanguage) {
-  const template = structuredClone(SOAP_TEMPLATE);
-  template.metadata.source_file = sourceFile;
-  template.metadata.language_of_source = transcriptLanguage;
-  const schemaText = JSON.stringify(template, null, 2);
+function buildSoapPrompt(transcript, sourceFile, transcriptLanguage = "Arabic", compact = false) {
+  transcriptLanguage = String(transcriptLanguage || "").trim() || "Arabic";
 
-  return `
+  if (compact) {
+    const schemaText = JSON.stringify(buildEmptyJsonTemplate(sourceFile, transcriptLanguage), null, 2);
+    return `
 You are a clinical documentation assistant.
 
 TRANSCRIPT_START
@@ -364,6 +433,39 @@ Strict JSON rules:
 JSON template:
 ${schemaText}
 `.trim();
+  }
+
+  const schemaText = JSON.stringify(JSON_SCHEMA_EXAMPLE, null, 2);
+
+  return `
+    You are a careful clinical documentation assistant.
+
+    Task:
+    Read the ${transcriptLanguage} transcript below and produce a structured JSON object in English.
+    The JSON must contain:
+    1. A clear English summary of the conversation.
+    2. Medical/clinical notes using a SOAP template: Subjective, Objective, Assessment, Plan.
+
+    Strict rules:
+    - Output valid JSON only. Do not include markdown, comments, or extra text.
+    - Use English in the output.
+    - Do not invent facts that are not present in the transcript.
+    - If information is missing, write "Not mentioned" or use an empty list [].
+    - Do not make a definitive diagnosis unless the transcript explicitly states one.
+    - Risk/safety information must only be included if explicitly mentioned in the transcript.
+    - Use ASCII double quotes " and ASCII comma , for JSON syntax.
+    - The note is for human clinician review, not a replacement for professional judgment.
+
+    Use this exact JSON structure as the target schema:
+    ${schemaText}
+
+    Source file: ${sourceFile}
+
+    ${transcriptLanguage} transcript:
+    
+    ${transcript}
+    
+    `.trim();
 }
 
 function messages(prompt, systemPrompt = "") {
@@ -586,7 +688,7 @@ async function translateWithFanar(env, transcript, sourceFile) {
   const prompt = buildTranslationPrompt(transcript, sourceFile);
   return callFanar(env, {
     model: env.FANAR_TRANSLATION_MODEL || "Fanar",
-    chatMessages: messages(prompt, "You are a faithful clinical Arabic-to-English translator."),
+    chatMessages: messages(prompt),
     maxTokens: Number(env.TRANSLATION_MAX_TOKENS || 4096),
     temperature: 0,
     jsonMode: false,
@@ -613,7 +715,7 @@ async function runGeneration(env, { transcript, inputName, modelKey }) {
   const translatedWithFanar = Boolean(config.translate_with_fanar && originalHasArabic);
   const modelInput = translatedWithFanar ? await translateWithFanar(env, transcript, sourceFile) : transcript;
   const transcriptLanguage = translatedWithFanar ? "English" : originalHasArabic ? "Arabic" : "English";
-  const prompt = buildSoapPrompt(modelInput, sourceFile, transcriptLanguage);
+  const prompt = buildSoapPrompt(modelInput, sourceFile, transcriptLanguage, Boolean(config.compact_default));
   const rawOutput = await callModel(env, config, {
     chatMessages: messages(prompt, config.system_prompt || ""),
     maxTokens: Number(env.SOAP_MAX_TOKENS || 4096),
