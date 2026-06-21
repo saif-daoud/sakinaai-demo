@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiEnabled, postJSON, setApiBase } from "./api.js";
-import { SoapViewer, TranscriptPreview } from "./renderers.jsx";
+import { SoapViewer } from "./renderers.jsx";
 import { containsArabic, copyText, downloadJson, downloadText, filenameSafe, formatTime, nowUtc } from "./utils.js";
 
 const STORAGE_KEYS = {
@@ -579,57 +579,53 @@ function App() {
             </div>
           )}
 
-          <section className="resultPanel">
-            <div className="resultHeader">
-              <div>
-                <div className="eyebrow">SOAP output</div>
-                <h1>{generation?.output_json ? modelLabel(generation.model_key) : "Awaiting generation"}</h1>
-              </div>
-              <div className="headerActions">
-                {generation?.translated_with_fanar && generation?.translated_transcript && (
-                  <button
-                    className="secondaryButton"
-                    type="button"
-                    aria-expanded={showTranslation}
-                    aria-controls="generated-translation"
-                    onClick={() => setShowTranslation((current) => !current)}
-                  >
-                    <Languages size={17} />
-                    {showTranslation ? "Hide translation" : "Show translation"}
-                  </button>
-                )}
-                <button className="secondaryButton" type="button" disabled={!generation?.output_json} onClick={() => void copyCurrent()}>
-                  <Clipboard size={17} />
-                  {copyStatus || "Copy JSON"}
-                </button>
-                <button className="primaryAction" type="button" disabled={!generation?.output_json} onClick={exportCurrent}>
-                  <FileJson size={17} />
-                  Export
-                </button>
-              </div>
-            </div>
-
-            {showTranslation && generation?.translated_transcript && (
-              <section className="translationPanel" id="generated-translation">
-                <div className="translationHeader">
-                  <div>
-                    <div className="eyebrow">Fanar translation</div>
-                    <h2>English model input</h2>
-                  </div>
-                  <span>{generation.translated_transcript.length.toLocaleString()} characters</span>
+          {generation?.output_json && (
+            <section className="resultPanel">
+              <div className="resultHeader">
+                <div>
+                  <div className="eyebrow">SOAP output</div>
+                  <h1>{modelLabel(generation.model_key)}</h1>
                 </div>
-                <pre className="translationText" dir="ltr">{generation.translated_transcript}</pre>
-              </section>
-            )}
-
-            {generation?.output_json ? (
-              <SoapViewer output={generation.output_json} />
-            ) : (
-              <div className="emptyResult">
-                <TranscriptPreview text={transcript} />
+                <div className="headerActions">
+                  {generation.translated_with_fanar && generation.translated_transcript && (
+                    <button
+                      className="secondaryButton"
+                      type="button"
+                      aria-expanded={showTranslation}
+                      aria-controls="generated-translation"
+                      onClick={() => setShowTranslation((current) => !current)}
+                    >
+                      <Languages size={17} />
+                      {showTranslation ? "Hide translation" : "Show translation"}
+                    </button>
+                  )}
+                  <button className="secondaryButton" type="button" onClick={() => void copyCurrent()}>
+                    <Clipboard size={17} />
+                    {copyStatus || "Copy JSON"}
+                  </button>
+                  <button className="primaryAction" type="button" onClick={exportCurrent}>
+                    <FileJson size={17} />
+                    Export
+                  </button>
+                </div>
               </div>
-            )}
-          </section>
+
+              {showTranslation && generation.translated_transcript && (
+                <section className="translationPanel" id="generated-translation">
+                  <div className="translationHeader">
+                    <div>
+                      <div className="eyebrow">Fanar translation</div>
+                      <h2>English model input</h2>
+                    </div>
+                    <span>{generation.translated_transcript.length.toLocaleString()} characters</span>
+                  </div>
+                  <pre className="translationText" dir="ltr">{generation.translated_transcript}</pre>
+                </section>
+              )}
+
+              <SoapViewer output={generation.output_json} />
+            </section>
+          )}
         </section>
       </main>
     </div>
