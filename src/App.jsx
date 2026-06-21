@@ -85,6 +85,58 @@ function mergeRuntimeModels(runtimeModels) {
   });
 }
 
+const GENERATION_FRIENDLY_ERROR = "We could not generate the SOAP note with the selected model. Please try again, or choose another model.";
+const TRANSLATION_FRIENDLY_ERROR = "The transcript could not be translated right now. Please try again, or choose a model that accepts Arabic directly.";
+
+function isProblemStatus(text) {
+  const lower = String(text || "").toLowerCase();
+  return [
+    "failed",
+    "unavailable",
+    "could not",
+    "did not",
+    "invalid",
+    "expired",
+    "not available",
+    "please add",
+    "try again",
+    "usage limit",
+  ].some((needle) => lower.includes(needle));
+}
+
+function friendlyGenerationStatus(error) {
+  const message = String(error?.message || "").trim();
+  const lower = message.toLowerCase();
+  if (!message) return GENERATION_FRIENDLY_ERROR;
+  if (
+    lower.includes("soap note")
+    || lower.includes("transcript")
+    || lower.includes("session")
+    || lower.includes("not available")
+    || lower.includes("usage limit")
+    || lower.includes("try again")
+  ) {
+    return message;
+  }
+  return GENERATION_FRIENDLY_ERROR;
+}
+
+function friendlyTranslationStatus(error) {
+  const message = String(error?.message || "").trim();
+  const lower = message.toLowerCase();
+  if (!message) return TRANSLATION_FRIENDLY_ERROR;
+  if (
+    lower.includes("translation")
+    || lower.includes("transcript")
+    || lower.includes("session")
+    || lower.includes("usage limit")
+    || lower.includes("try again")
+  ) {
+    return message;
+  }
+  return TRANSLATION_FRIENDLY_ERROR;
+}
+
 function App() {
   const fileInputRef = useRef(null);
   const responseStreamTimerRef = useRef(null);
@@ -270,7 +322,7 @@ function App() {
     setGeneration(nextGeneration);
     setStreamedResponse("");
     setResponseStreaming(true);
-    setStatus("Generation complete — streaming response...");
+    setStatus("Generation complete - streaming response...");
 
     responseStreamTimerRef.current = window.setInterval(() => {
       cursor = Math.min(text.length, cursor + chunkSize);
@@ -303,7 +355,7 @@ function App() {
       setShowPreparedTranslation(true);
       setStatus("English translation ready. Review it, then generate the SOAP note.");
     } catch (error) {
-      setStatus(error?.message || "Translation failed.");
+      setStatus(friendlyTranslationStatus(error));
     } finally {
       setTranslationBusy(false);
     }
@@ -347,7 +399,7 @@ function App() {
       streamCompletedGeneration(payload.generation);
       await refreshHistory();
     } catch (error) {
-      setStatus(error?.message || "Generation failed.");
+      setStatus(friendlyGenerationStatus(error));
     } finally {
       setBusy(false);
     }
@@ -620,8 +672,14 @@ function App() {
           )}
 
           {status && (
-            <div className={status.toLowerCase().includes("failed") || status.toLowerCase().includes("unavailable") ? "statusBanner danger" : "statusBanner"}>
-              {busy || translationBusy || responseStreaming ? <RefreshCw size={16} className="spin" /> : <CheckCircle2 size={16} />}
+            <div className={isProblemStatus(status) ? "statusBanner danger" : "statusBanner"}>
+              {busy || translationBusy || responseStreaming ? (
+                <RefreshCw size={16} className="spin" />
+              ) : isProblemStatus(status) ? (
+                <AlertCircle size={16} />
+              ) : (
+                <CheckCircle2 size={16} />
+              )}
               <span>{status}</span>
             </div>
           )}

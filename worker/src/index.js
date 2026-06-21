@@ -659,6 +659,59 @@ function openRouterKeyError(error) {
   return /http (401|402|403|429)/.test(text) || ["rate limit", "quota", "credit", "insufficient", "exhausted", "usage limit"].some((needle) => text.includes(needle));
 }
 
+function expertFacingGenerationError(error) {
+  const text = String(error?.message || "");
+  const lower = text.toLowerCase();
+
+  if (lower.includes("transcript is empty")) {
+    return "Please add a transcript before generating the SOAP note.";
+  }
+  if (lower.includes("unknown model") || lower.includes("unsupported provider") || lower.includes("not currently served") || lower.includes("not available")) {
+    return "This model is not available in the demo right now. Please choose another model.";
+  }
+  if (lower.includes("model output") || lower.includes("non-json") || lower.includes("json")) {
+    return "The selected model did not produce a complete SOAP note. Please try again, or choose another model.";
+  }
+  if (lower.includes("fanar") || lower.includes("translation")) {
+    return "The transcript could not be translated right now. Please try again, or choose a model that accepts Arabic directly.";
+  }
+  if (lower.includes("rate limit") || lower.includes("quota") || lower.includes("credit") || lower.includes("exhausted") || lower.includes("usage limit")) {
+    return "This model is temporarily busy or has reached its usage limit. Please try another model or try again later.";
+  }
+  if (lower.includes("timeout") || lower.includes("network") || lower.includes("fetch")) {
+    return "The selected model took too long to respond. Please try again, or choose another model.";
+  }
+
+  return "We could not generate the SOAP note with the selected model. Please try again, or choose another model.";
+}
+
+function expertFacingTranslationError(error) {
+  const text = String(error?.message || "");
+  const lower = text.toLowerCase();
+
+  if (lower.includes("transcript is empty")) {
+    return "Please add a transcript before requesting the English translation.";
+  }
+  if (lower.includes("does not contain arabic")) {
+    return "This transcript does not appear to contain Arabic text, so a Fanar translation is not needed.";
+  }
+  if (lower.includes("rate limit") || lower.includes("quota") || lower.includes("credit") || lower.includes("exhausted") || lower.includes("usage limit")) {
+    return "The translation service is temporarily busy or has reached its usage limit. Please try again later.";
+  }
+
+  return "The transcript could not be translated right now. Please try again, or choose a model that accepts Arabic directly.";
+}
+
+function expertFacingRequestError(error, path) {
+  const message = String(error?.message || "Request failed");
+  if (["Bad token", "Expired token"].includes(message)) {
+    return "Your session has expired. Please enter the demo again.";
+  }
+  if (path.endsWith("/api/translate")) return expertFacingTranslationError(error);
+  if (path.endsWith("/api/generate")) return expertFacingGenerationError(error);
+  return message;
+}
+
 async function callFanar(env, { model, chatMessages, maxTokens = 2048, temperature = 0, jsonMode = false }) {
   if (!env.FANAR_API) throw new Error("FANAR_API Worker secret is missing");
   const headers = {
@@ -1079,7 +1132,7 @@ function clientGeneration(row) {
     output_json: typeof row.output_json === "string" && row.output_json ? JSON.parse(row.output_json) : row.output_json,
     raw_output: row.raw_output,
     status: row.status,
-    error: row.error,
+    error: row.status === "failed" && row.error ? expertFacingGenerationError({ message: row.error }) : row.error,
     created_at: row.created_at,
     completed_at: row.completed_at,
   };
@@ -1102,6 +1155,7 @@ async function listHistory(env, expertUid) {
   return (rows?.results || []).map((row) => ({
     ...row,
     translated_with_fanar: Boolean(row.translated_with_fanar),
+    error: row.status === "failed" && row.error ? expertFacingGenerationError({ message: row.error }) : row.error,
   }));
 }
 
@@ -1254,7 +1308,7 @@ export default {
             completed_at: new Date().toISOString(),
           };
           await insertGeneration(env, row);
-          return json({ error: row.error, generation: clientGeneration(row) }, 500, headers);
+          return json({ error: expertFacingGenerationError(error), generation: clientGeneration(row) }, 500, headers);
         }
       }
 
@@ -1262,7 +1316,7 @@ export default {
     } catch (error) {
       const message = error?.message || "Request failed";
       const status = ["Bad token", "Expired token"].includes(message) ? 401 : 400;
-      return json({ error: message }, status, headers);
+      return json({ error: expertFacingRequestError(error, path) }, status, headers);
     }
   },
 };
