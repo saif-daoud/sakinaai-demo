@@ -104,9 +104,14 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
   const [showTranslation, setShowTranslation] = useState(false);
+  const [preparedTranslation, setPreparedTranslation] = useState(null);
+  const [showPreparedTranslation, setShowPreparedTranslation] = useState(false);
+  const [translationBusy, setTranslationBusy] = useState(false);
   const selectedModelInfo = useMemo(() => modelOptions.find((item) => item.key === selectedModel), [modelOptions, selectedModel]);
   const transcriptHasArabic = containsArabic(transcript);
-  const canGenerate = apiEnabled() && token && transcript.trim() && selectedModelInfo?.enabled && !busy;
+  const requiresTranslation = selectedModelInfo?.language === "Fanar to English" && transcriptHasArabic;
+  const canGenerate = apiEnabled() && token && transcript.trim() && selectedModelInfo?.enabled && !busy && !translationBusy;
+  const canGenerateTranslation = apiEnabled() && token && transcript.trim() && requiresTranslation && !busy && !translationBusy;
 
   useEffect(() => {
     document.title = "SakinaAI SOAP Demo";
@@ -197,6 +202,8 @@ function App() {
     setToken("");
     setGeneration(null);
     setShowTranslation(false);
+    setPreparedTranslation(null);
+    setShowPreparedTranslation(false);
     setHistory([]);
     setModelOptions(MODEL_OPTIONS);
   }
@@ -227,12 +234,45 @@ function App() {
     setTranscript(text);
     setInputName(file.name || "uploaded-transcript.txt");
     setGeneration(null);
+    setPreparedTranslation(null);
+    setShowPreparedTranslation(false);
+  }
+
+  async function generateTranslation() {
+    if (preparedTranslation) {
+      setShowPreparedTranslation((current) => !current);
+      return;
+    }
+    if (!canGenerateTranslation) return;
+
+    setTranslationBusy(true);
+    setStatus("Generating English translation with Fanar...");
+    try {
+      const payload = await postJSON(
+        "/api/translate",
+        { token, transcript, input_name: inputName },
+        { timeoutMs: 240000 },
+      );
+      setPreparedTranslation(payload.translation || null);
+      setShowPreparedTranslation(true);
+      setStatus("English translation ready. Review it, then generate the SOAP note.");
+    } catch (error) {
+      setStatus(error?.message || "Translation failed.");
+    } finally {
+      setTranslationBusy(false);
+    }
   }
 
   async function generateSoap() {
     if (!canGenerate) return;
     setBusy(true);
-    setStatus("Generating SOAP note...");
+    setStatus(
+      requiresTranslation
+        ? preparedTranslation
+          ? "Generating SOAP note from the reviewed English translation..."
+          : "Generating English translation with Fanar, then the SOAP note..."
+        : "Generating SOAP note...",
+    );
     setGeneration(null);
     setShowTranslation(false);
 
@@ -244,10 +284,20 @@ function App() {
           model_key: selectedModel,
           transcript,
           input_name: inputName,
+          translated_transcript: requiresTranslation ? preparedTranslation?.text || "" : "",
+          translation_source_sha256: requiresTranslation ? preparedTranslation?.source_sha256 || "" : "",
         },
         { timeoutMs: 240000 },
       );
       setGeneration(payload.generation);
+      if (payload.generation?.translated_transcript) {
+        setPreparedTranslation({
+          text: payload.generation.translated_transcript,
+          source_sha256: payload.generation.output_json?.metadata?.source_sha256 || "",
+          source_character_count: payload.generation.output_json?.metadata?.source_character_count || transcript.length,
+          translation_character_count: payload.generation.translated_transcript.length,
+        });
+      }
       setStatus("Generation complete");
       await refreshHistory();
     } catch (error) {
@@ -413,11 +463,23 @@ function App() {
                   className="historyItem"
                   type="button"
                   onClick={() => {
+                    const outputJson = item.output_json ? JSON.parse(item.output_json) : null;
                     setGeneration({
                       ...item,
-                      output_json: item.output_json ? JSON.parse(item.output_json) : null,
+                      output_json: outputJson,
                     });
                     setShowTranslation(false);
+                    setPreparedTranslation(
+                      item.translated_transcript
+                        ? {
+                            text: item.translated_transcript,
+                            source_sha256: outputJson?.metadata?.source_sha256 || "",
+                            source_character_count: outputJson?.metadata?.source_character_count || item.transcript_text?.length || 0,
+                            translation_character_count: item.translated_transcript.length,
+                          }
+                        : null,
+                    );
+                    setShowPreparedTranslation(false);
                     setSelectedModel(item.model_key || selectedModel);
                     if (item.transcript_text) setTranscript(item.transcript_text);
                   }}
@@ -463,12 +525,33 @@ function App() {
               onChange={(event) => {
                 setTranscript(event.target.value);
                 setInputName("pasted-transcript.txt");
+                setPreparedTranslation(null);
+                setShowPreparedTranslation(false);
               }}
               placeholder="الصق نص الجلسة العربية هنا"
             />
             <div className="inputFooter">
               <span>{transcript.trim().length.toLocaleString()} characters</span>
               <span>{transcriptHasArabic ? "Arabic detected" : "Arabic not detected"}</span>
+              {requiresTranslation && (
+                <button
+                  className="secondaryButton translationAction"
+                  type="button"
+                  disabled={!preparedTranslation && !canGenerateTranslation}
+                  aria-expanded={Boolean(preparedTranslation && showPreparedTranslation)}
+                  aria-controls="prepared-translation"
+                  onClick={() => void generateTranslation()}
+                >
+                  {translationBusy ? <RefreshCw size={17} className="spin" /> : <Languages size={17} />}
+                  {translationBusy
+                    ? "Translating..."
+                    : preparedTranslation
+                      ? showPreparedTranslation
+                        ? "Hide translation"
+                        : "Show translation"
+                      : "Generate translation"}
+                </button>
+              )}
               <button className="primaryAction" type="button" disabled={!canGenerate} onClick={() => void generateSoap()}>
                 {busy ? <RefreshCw size={18} className="spin" /> : <Send size={18} />}
                 {busy ? "Generating..." : "Generate SOAP"}
@@ -476,9 +559,22 @@ function App() {
             </div>
           </section>
 
+          {requiresTranslation && showPreparedTranslation && preparedTranslation?.text && (
+            <section className="translationPanel preparedTranslationPanel" id="prepared-translation">
+              <div className="translationHeader">
+                <div>
+                  <div className="eyebrow">Fanar translation</div>
+                  <h2>English text that will be sent to {selectedModelInfo?.label}</h2>
+                </div>
+                <span>{preparedTranslation.translation_character_count?.toLocaleString() || preparedTranslation.text.length.toLocaleString()} characters</span>
+              </div>
+              <pre className="translationText" dir="ltr">{preparedTranslation.text}</pre>
+            </section>
+          )}
+
           {status && (
             <div className={status.toLowerCase().includes("failed") || status.toLowerCase().includes("unavailable") ? "statusBanner danger" : "statusBanner"}>
-              {busy ? <RefreshCw size={16} className="spin" /> : <CheckCircle2 size={16} />}
+              {busy || translationBusy ? <RefreshCw size={16} className="spin" /> : <CheckCircle2 size={16} />}
               <span>{status}</span>
             </div>
           )}

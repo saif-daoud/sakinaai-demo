@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { testSupport } from "../src/index.js";
 
@@ -7,6 +8,7 @@ const {
   callModel,
   publicModelRegistry,
   runGeneration,
+  runTranslation,
   splitKeys,
 } = testSupport;
 
@@ -118,6 +120,50 @@ test("every model route includes the session content used for generation", async
       assert.equal(result.outputJson.metadata.source_character_count, sourceTranscript.length, modelKey);
       assert.equal(result.outputJson.metadata.model_input_character_count, expectedContext.length, modelKey);
     }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("explicit translation returns the full Fanar output with source audit data", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody = null;
+  globalThis.fetch = async (_url, options = {}) => {
+    requestBody = JSON.parse(options.body || "{}");
+    return new Response(JSON.stringify({ choices: [{ message: { content: translatedTranscript } }] }), { status: 200 });
+  };
+
+  try {
+    const result = await runTranslation(testEnv(), sourceTranscript, "translation-test.txt");
+    assert.ok(JSON.stringify(requestBody).includes(sourceTranscript));
+    assert.equal(result.text, translatedTranscript);
+    assert.equal(result.source_character_count, sourceTranscript.length);
+    assert.equal(result.translation_character_count, translatedTranscript.length);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("reviewed translation is reused without a second Fanar request", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), body: JSON.parse(options.body || "{}") });
+    return new Response(JSON.stringify({ choices: [{ message: { content: soapOutput } }] }), { status: 200 });
+  };
+
+  try {
+    const result = await runGeneration(testEnv(), {
+      transcript: sourceTranscript,
+      inputName: "reuse-test.txt",
+      modelKey: "gpt4_1",
+      pretranslatedTranscript: translatedTranscript,
+      translationSourceSha256: createHash("sha256").update(sourceTranscript).digest("hex"),
+    });
+    assert.equal(requests.length, 1);
+    assert.ok(requests[0].url.includes("azure.example"));
+    assert.ok(JSON.stringify(requests[0].body).includes(translatedTranscript));
+    assert.equal(result.outputJson.metadata.reused_pretranslated_input, true);
   } finally {
     globalThis.fetch = originalFetch;
   }
