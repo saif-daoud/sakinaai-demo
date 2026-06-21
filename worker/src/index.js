@@ -96,6 +96,7 @@ const MODEL_REGISTRY = {
   gpt4_1: {
     provider: "openrouter",
     model: "openai/gpt-4.1",
+    min_smoke_tokens: 16,
     translate_with_fanar: true,
     system_prompt: "You are a careful medical documentation assistant. Produce faithful clinical notes from the provided transcript only.",
   },
@@ -645,6 +646,24 @@ async function runGeneration(env, { transcript, inputName, modelKey }) {
   };
 }
 
+async function runSmoke(env, modelKey, requestedMaxTokens = 2) {
+  const [resolvedKey, config] = resolveModel(modelKey);
+  const maxTokens = Math.max(Number(requestedMaxTokens || 2), Number(config.min_smoke_tokens || 0));
+  const text = await callModel(env, config, {
+    chatMessages: messages("Reply with OK.", "You are a concise assistant."),
+    maxTokens,
+    temperature: 0,
+    jsonMode: false,
+  });
+  return {
+    model_key: resolvedKey,
+    provider: config.provider,
+    model_name: config.model,
+    max_tokens: maxTokens,
+    preview: String(text || "").replace(/\s+/g, " ").trim().slice(0, 180),
+  };
+}
+
 async function insertGeneration(env, row) {
   await env.DB
     .prepare(
@@ -767,6 +786,12 @@ export default {
       if (path.endsWith("/api/stats")) {
         await verifyToken(env, body.token);
         return json({ ok: true, stats: await stats(env) }, 200, headers);
+      }
+
+      if (path.endsWith("/api/smoke")) {
+        await verifyToken(env, body.token);
+        const result = await runSmoke(env, body.model_key, body.max_tokens);
+        return json({ ok: true, smoke: result }, 200, headers);
       }
 
       if (path.endsWith("/api/generate")) {

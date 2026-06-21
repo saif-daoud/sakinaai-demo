@@ -113,8 +113,13 @@ jobs:
 
           EFFECTIVE_ACCESS_HASHES="${ACCESS_CODE_HASHES:-${ACCESS_CODE_HASH:-}}"
           EFFECTIVE_OPENROUTER_KEYS="${OPENROUTER_API_KEYS:-${API_KEYS:-}}"
+          if [ -n "${TOKEN_SECRET:-}" ]; then
+            EFFECTIVE_TOKEN_SECRET="$TOKEN_SECRET"
+          else
+            EFFECTIVE_TOKEN_SECRET="$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")"
+          fi
 
-          put_secret TOKEN_SECRET "${TOKEN_SECRET:-}"
+          put_secret TOKEN_SECRET "$EFFECTIVE_TOKEN_SECRET"
           put_secret ACCESS_CODE_HASHES "${EFFECTIVE_ACCESS_HASHES:-}"
           put_secret FANAR_API "${FANAR_API:-}"
           put_secret HF_API "${HF_API:-}"

@@ -76,6 +76,22 @@ The D1 database stores:
 - raw model output
 - failed generation attempts and error messages
 
+## Smoke Testing
+
+After signing in, the Worker accepts authenticated low-token smoke checks at
+`POST /api/smoke`:
+
+```json
+{
+  "token": "session-token",
+  "model_key": "fanar2",
+  "max_tokens": 2
+}
+```
+
+This uses the same deployed provider routing as `/api/generate`, but it does
+not create a SOAP note or database generation row.
+
 ## Model Routes
 
 Working API routes are enabled for:

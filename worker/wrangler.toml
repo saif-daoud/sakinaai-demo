@@ -10,3 +10,4 @@ database_id = "replace-with-cloudflare-d1-database-id"
 
 [vars]
 ALLOWED_ORIGINS = "https://saif-daoud.github.io,http://127.0.0.1:5173,http://localhost:5173"
+ACCESS_CODE_HASHES = "cd8c2de382d3bab299fa20c4dba2a2c43adbda8dccae9abc6f95a985f69fa600"
