@@ -1,0 +1,13 @@
+name = "sakinaai-demo-api"
+main = "src/index.js"
+compatibility_date = "2026-06-21"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sakinaai_demo"
+database_id = "replace-with-cloudflare-d1-database-id"
+
+[vars]
+ALLOWED_ORIGINS = "https://saif-daoud.github.io,http://127.0.0.1:5173,http://localhost:5173"
+ACCESS_CODE_HASHES = "a7f5fbabd1624ba763ed037a9b3ed7289cda4e739b06be222f6d3589cdba8a87"

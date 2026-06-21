@@ -1,0 +1,15 @@
+{
+  "name": "sakinaai-demo-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate:local": "wrangler d1 migrations apply sakinaai_demo --local",
+    "migrate:remote": "wrangler d1 migrations apply sakinaai_demo --remote"
+  },
+  "devDependencies": {
+    "wrangler": "^4.54.0"
+  }
+}
