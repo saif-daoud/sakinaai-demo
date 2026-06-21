@@ -19,7 +19,7 @@ import {
   Upload,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { apiEnabled, getApiBase, postJSON, setApiBase } from "./api.js";
+import { apiEnabled, postJSON, setApiBase } from "./api.js";
 import { SoapViewer, TranscriptPreview } from "./renderers.jsx";
 import { containsArabic, copyText, downloadJson, downloadText, filenameSafe, formatTime, nowUtc } from "./utils.js";
 
@@ -278,10 +278,6 @@ function App() {
               {accessBusy ? "Checking..." : "Enter demo"}
             </button>
           </form>
-          <div className={apiEnabled() ? "statusBanner" : "statusBanner warning"}>
-            <Cloud size={16} />
-            <span>{apiStatus}{getApiBase() ? ` at ${getApiBase()}` : ""}</span>
-          </div>
           {accessStatus && (
             <div className="statusBanner danger">
               <AlertCircle size={16} />
