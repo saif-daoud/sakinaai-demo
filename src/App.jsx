@@ -6,7 +6,6 @@ import {
   Database,
   Download,
   FileJson,
-  FileText,
   KeyRound,
   Languages,
   LockKeyhole,
@@ -15,7 +14,6 @@ import {
   RefreshCw,
   Send,
   ShieldCheck,
-  Sparkles,
   Upload,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -31,21 +29,26 @@ const STORAGE_KEYS = {
 };
 
 const MODEL_OPTIONS = [
-  { key: "fanar2", label: "Fanar C-2 27B", provider: "Fanar API", language: "Arabic direct", enabled: true },
-  { key: "gemma4", label: "Gemma 4 31B", provider: "OpenRouter", language: "Arabic direct", enabled: true },
-  { key: "acegpt", label: "AceGPT v2 8B", provider: "Hugging Face", language: "Arabic direct", enabled: true },
-  { key: "openbiollm_8b", label: "OpenBioLLM 8B", provider: "Hugging Face", language: "Fanar to English", enabled: true },
-  { key: "med42_8b", label: "Med42 8B", provider: "Hugging Face", language: "Fanar to English", enabled: true },
-  { key: "jsl_medllama_8b", label: "JSL MedLlama 8B", provider: "Hugging Face", language: "Fanar to English", enabled: true },
-  { key: "gpt4_1", label: "GPT-4.1", provider: "OpenRouter", language: "Fanar to English", enabled: true },
-  { key: "deepseek_v32", label: "DeepSeek V3.2", provider: "OpenRouter", language: "Fanar to English", enabled: true },
-  { key: "llama_33_70b", label: "Llama 3.3 70B", provider: "OpenRouter", language: "Fanar to English", enabled: true },
-  { key: "allam", label: "ALLaM 7B", provider: "Hugging Face", language: "Arabic direct", enabled: false },
-  { key: "falcon_h1", label: "Falcon H1 3B", provider: "Hugging Face", language: "Arabic direct", enabled: false },
-  { key: "bimedix2_bi", label: "BiMediX2 8B Bi", provider: "Hugging Face", language: "Arabic direct", enabled: false },
-  { key: "bimedix2_hf", label: "BiMediX2 8B HF", provider: "Hugging Face", language: "Fanar to English", enabled: false },
-  { key: "medgemma_4b", label: "MedGemma 4B", provider: "Hugging Face", language: "Fanar to English", enabled: false },
-  { key: "biomistral_7b", label: "BioMistral 7B", provider: "Hugging Face", language: "Fanar to English", enabled: false },
+  { key: "fanar2", label: "Fanar C-2 27B", category: "non-medical", provider: "Fanar API", language: "Arabic direct", enabled: true },
+  { key: "gemma4", label: "Gemma 4 31B", category: "non-medical", provider: "OpenRouter", language: "Arabic direct", enabled: true },
+  { key: "acegpt", label: "AceGPT v2 8B", category: "non-medical", provider: "Hugging Face", language: "Arabic direct", enabled: true },
+  { key: "gpt4_1", label: "GPT-4.1", category: "non-medical", provider: "Azure OpenAI", language: "Fanar to English", enabled: true },
+  { key: "deepseek_v32", label: "DeepSeek V3.2", category: "non-medical", provider: "Azure AI / OpenAI compatible", language: "Fanar to English", enabled: true },
+  { key: "llama_33_70b", label: "Llama 3.3 70B", category: "non-medical", provider: "Azure AI / OpenAI compatible", language: "Fanar to English", enabled: true },
+  { key: "allam", label: "ALLaM 7B", category: "non-medical", provider: "Hugging Face", language: "Arabic direct", enabled: false },
+  { key: "falcon_h1", label: "Falcon H1 3B", category: "non-medical", provider: "Hugging Face", language: "Arabic direct", enabled: false },
+  { key: "openbiollm_8b", label: "OpenBioLLM 8B", category: "medical", provider: "Hugging Face", language: "Fanar to English", enabled: true },
+  { key: "med42_8b", label: "Med42 8B", category: "medical", provider: "Hugging Face", language: "Fanar to English", enabled: true },
+  { key: "jsl_medllama_8b", label: "JSL MedLlama 8B", category: "medical", provider: "Hugging Face", language: "Fanar to English", enabled: true },
+  { key: "bimedix2_bi", label: "BiMediX2 8B Bi", category: "medical", provider: "Hugging Face", language: "Arabic direct", enabled: false },
+  { key: "bimedix2_hf", label: "BiMediX2 8B HF", category: "medical", provider: "Hugging Face", language: "Fanar to English", enabled: false },
+  { key: "medgemma_4b", label: "MedGemma 4B", category: "medical", provider: "Hugging Face", language: "Fanar to English", enabled: false },
+  { key: "biomistral_7b", label: "BioMistral 7B", category: "medical", provider: "Hugging Face", language: "Fanar to English", enabled: false },
+];
+
+const MODEL_GROUPS = [
+  { key: "medical", label: "Medical models" },
+  { key: "non-medical", label: "Non-medical models" },
 ];
 
 function loadJson(key, fallback = null) {
@@ -69,6 +72,19 @@ function modelLabel(key) {
   return MODEL_OPTIONS.find((item) => item.key === key)?.label || key;
 }
 
+function mergeRuntimeModels(runtimeModels) {
+  return MODEL_OPTIONS.map((model) => {
+    const runtime = runtimeModels?.[model.key];
+    if (!runtime) return model;
+    return {
+      ...model,
+      enabled: Boolean(runtime.available),
+      provider: runtime.provider_label || model.provider,
+      unavailableReason: runtime.unavailable_reason || "",
+    };
+  });
+}
+
 function App() {
   const fileInputRef = useRef(null);
   const [runtimeLoaded, setRuntimeLoaded] = useState(false);
@@ -83,10 +99,12 @@ function App() {
   const [inputName, setInputName] = useState("pasted-transcript.txt");
   const [generation, setGeneration] = useState(null);
   const [history, setHistory] = useState([]);
+  const [modelOptions, setModelOptions] = useState(MODEL_OPTIONS);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
-  const selectedModelInfo = useMemo(() => MODEL_OPTIONS.find((item) => item.key === selectedModel), [selectedModel]);
+  const [showTranslation, setShowTranslation] = useState(false);
+  const selectedModelInfo = useMemo(() => modelOptions.find((item) => item.key === selectedModel), [modelOptions, selectedModel]);
   const transcriptHasArabic = containsArabic(transcript);
   const canGenerate = apiEnabled() && token && transcript.trim() && selectedModelInfo?.enabled && !busy;
 
@@ -123,7 +141,10 @@ function App() {
   }, [selectedModel]);
 
   useEffect(() => {
-    if (runtimeLoaded && token && apiEnabled()) void refreshHistory();
+    if (runtimeLoaded && token && apiEnabled()) {
+      void refreshModels();
+      void refreshHistory();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runtimeLoaded, token]);
 
@@ -158,7 +179,10 @@ function App() {
       localStorage.setItem(STORAGE_KEYS.token, String(payload.token || ""));
       setAccessStatus("");
       setApiStatus("Session ready");
-      await refreshHistory(String(payload.token || ""));
+      await Promise.all([
+        refreshModels(String(payload.token || "")),
+        refreshHistory(String(payload.token || "")),
+      ]);
     } catch (error) {
       setAccessStatus(error?.message || "Access failed.");
     } finally {
@@ -172,7 +196,19 @@ function App() {
     setExpert(null);
     setToken("");
     setGeneration(null);
+    setShowTranslation(false);
     setHistory([]);
+    setModelOptions(MODEL_OPTIONS);
+  }
+
+  async function refreshModels(explicitToken = token) {
+    if (!explicitToken || !apiEnabled()) return;
+    try {
+      const payload = await postJSON("/api/models", { token: explicitToken }, { timeoutMs: 30000 });
+      setModelOptions(mergeRuntimeModels(payload.models));
+    } catch (error) {
+      setStatus(`Model availability unavailable: ${error?.message || "request failed"}`);
+    }
   }
 
   async function refreshHistory(explicitToken = token) {
@@ -198,6 +234,7 @@ function App() {
     setBusy(true);
     setStatus("Generating SOAP note...");
     setGeneration(null);
+    setShowTranslation(false);
 
     try {
       const payload = await postJSON(
@@ -333,20 +370,27 @@ function App() {
                 <h2>LLM selection</h2>
               </div>
             </div>
-            <div className="modelList">
-              {MODEL_OPTIONS.map((model) => (
-                <button
-                  key={model.key}
-                  className={`modelCard ${selectedModel === model.key ? "active" : ""}`}
-                  type="button"
-                  disabled={!model.enabled}
-                  onClick={() => setSelectedModel(model.key)}
-                  title={model.enabled ? model.label : "Not currently served by the configured provider"}
-                >
-                  <strong>{model.label}</strong>
-                  <span>{model.provider}</span>
-                  <small>{model.enabled ? model.language : "Provider unavailable"}</small>
-                </button>
+            <div className="modelGroupList">
+              {MODEL_GROUPS.map((group) => (
+                <section className="modelGroup" key={group.key} aria-labelledby={`model-group-${group.key}`}>
+                  <h3 id={`model-group-${group.key}`}>{group.label}</h3>
+                  <div className="modelList">
+                    {modelOptions.filter((model) => model.category === group.key).map((model) => (
+                      <button
+                        key={model.key}
+                        className={`modelCard ${selectedModel === model.key ? "active" : ""}`}
+                        type="button"
+                        disabled={!model.enabled}
+                        onClick={() => setSelectedModel(model.key)}
+                        title={model.enabled ? model.label : model.unavailableReason || "This repository has no live inference endpoint"}
+                      >
+                        <strong>{model.label}</strong>
+                        <span>{model.provider}</span>
+                        <small>{model.enabled ? model.language : "Dedicated endpoint required"}</small>
+                      </button>
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
           </section>
@@ -373,6 +417,7 @@ function App() {
                       ...item,
                       output_json: item.output_json ? JSON.parse(item.output_json) : null,
                     });
+                    setShowTranslation(false);
                     setSelectedModel(item.model_key || selectedModel);
                     if (item.transcript_text) setTranscript(item.transcript_text);
                   }}
@@ -445,6 +490,18 @@ function App() {
                 <h1>{generation?.output_json ? modelLabel(generation.model_key) : "Awaiting generation"}</h1>
               </div>
               <div className="headerActions">
+                {generation?.translated_with_fanar && generation?.translated_transcript && (
+                  <button
+                    className="secondaryButton"
+                    type="button"
+                    aria-expanded={showTranslation}
+                    aria-controls="generated-translation"
+                    onClick={() => setShowTranslation((current) => !current)}
+                  >
+                    <Languages size={17} />
+                    {showTranslation ? "Hide translation" : "Show translation"}
+                  </button>
+                )}
                 <button className="secondaryButton" type="button" disabled={!generation?.output_json} onClick={() => void copyCurrent()}>
                   <Clipboard size={17} />
                   {copyStatus || "Copy JSON"}
@@ -456,16 +513,21 @@ function App() {
               </div>
             </div>
 
-            {generation?.output_json ? (
-              <>
-                <div className="metaStrip">
-                  <span><Sparkles size={15} /> {generation.provider}</span>
-                  <span><FileText size={15} /> {generation.input_name || "transcript"}</span>
-                  {generation.translated_with_fanar && <span><Languages size={15} /> Fanar translation</span>}
-                  <span>{formatTime(generation.created_at)}</span>
+            {showTranslation && generation?.translated_transcript && (
+              <section className="translationPanel" id="generated-translation">
+                <div className="translationHeader">
+                  <div>
+                    <div className="eyebrow">Fanar translation</div>
+                    <h2>English model input</h2>
+                  </div>
+                  <span>{generation.translated_transcript.length.toLocaleString()} characters</span>
                 </div>
-                <SoapViewer output={generation.output_json} />
-              </>
+                <pre className="translationText" dir="ltr">{generation.translated_transcript}</pre>
+              </section>
+            )}
+
+            {generation?.output_json ? (
+              <SoapViewer output={generation.output_json} />
             ) : (
               <div className="emptyResult">
                 <TranscriptPreview text={transcript} />

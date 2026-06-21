@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "test": "node --test test/*.test.mjs",
     "migrate:local": "wrangler d1 migrations apply sakinaai_demo --local",
     "migrate:remote": "wrangler d1 migrations apply sakinaai_demo --remote"
   },

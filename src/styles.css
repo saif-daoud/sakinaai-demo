@@ -226,7 +226,10 @@ button {
 
 .appShell {
   min-height: 100vh;
-  background: #eef2f5;
+  background:
+    radial-gradient(circle at 85% 8%, rgba(47, 111, 223, 0.07), transparent 24rem),
+    radial-gradient(circle at 8% 38%, rgba(15, 118, 110, 0.06), transparent 28rem),
+    #eef2f5;
 }
 
 .topbar {
@@ -332,7 +335,7 @@ button {
 .demoLayout {
   display: grid;
   grid-template-columns: 330px minmax(0, 1fr);
-  gap: 18px;
+  gap: 20px;
   width: min(1580px, 100%);
   margin: 0 auto;
   padding: 18px 20px 44px;
@@ -350,8 +353,8 @@ button {
   min-width: 0;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: 0 8px 26px rgba(23, 32, 51, 0.06);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(23, 32, 51, 0.07);
 }
 
 .panelBlock {
@@ -372,20 +375,48 @@ button {
   font-size: 22px;
 }
 
-.modelList,
+.modelGroupList,
 .historyList {
   display: grid;
   gap: 9px;
   margin-top: 14px;
 }
 
+.modelGroup {
+  display: grid;
+  gap: 9px;
+}
+
+.modelGroup + .modelGroup {
+  margin-top: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.modelGroup h3 {
+  margin: 0;
+  color: #526277;
+  font-size: 13px;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.modelList {
+  display: grid;
+  gap: 7px;
+}
+
 .modelCard,
 .historyItem {
   display: grid;
   justify-items: start;
+  justify-content: stretch;
+  align-content: center;
+  gap: 3px;
   width: 100%;
-  min-height: 76px;
-  padding: 11px;
+  min-height: 68px;
+  padding: 10px 12px;
   color: #26364b;
   background: #f7f9fc;
   border: 1px solid var(--line);
@@ -401,7 +432,9 @@ button {
 
 .modelCard strong,
 .historyItem strong {
+  width: 100%;
   font-weight: 950;
+  line-height: 1.25;
 }
 
 .modelCard span,
@@ -417,6 +450,9 @@ button {
   display: grid;
   gap: 16px;
   min-width: 0;
+  align-self: start;
+  align-content: start;
+  grid-auto-rows: max-content;
 }
 
 .inputPanel,
@@ -433,7 +469,7 @@ button {
 
 .transcriptInput {
   width: 100%;
-  min-height: 260px;
+  min-height: clamp(240px, 34vh, 430px);
   margin-top: 14px;
   resize: vertical;
   padding: 14px;
@@ -450,8 +486,7 @@ button {
   box-shadow: 0 0 0 3px rgba(47, 111, 223, 0.13);
 }
 
-.inputFooter,
-.metaStrip {
+.inputFooter {
   display: flex;
   gap: 10px;
   align-items: center;
@@ -467,23 +502,53 @@ button {
 }
 
 .resultPanel {
-  min-height: 420px;
+  min-height: 280px;
 }
 
-.metaStrip {
-  padding: 10px 0 14px;
-  border-bottom: 1px solid var(--line);
+.translationPanel {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px;
+  background: linear-gradient(135deg, #f2faf8, #f7f9fc);
+  border: 1px solid #bee3da;
+  border-radius: 10px;
 }
 
-.metaStrip span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 9px;
-  color: #26364b;
-  background: #f7f9fc;
+.translationHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.translationHeader h2 {
+  margin: 5px 0 0;
+  color: var(--ink);
+  font-size: 18px;
+}
+
+.translationHeader > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.translationText {
+  max-height: 380px;
+  overflow: auto;
+  margin: 0;
+  padding: 14px;
+  color: var(--ink);
+  background: #fff;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.7;
+  text-align: left;
+  white-space: pre-wrap;
 }
 
 .emptyResult {
@@ -506,7 +571,7 @@ button {
 }
 
 .outputViewer {
-  padding-top: 14px;
+  padding-top: 16px;
 }
 
 .soapStack {
@@ -679,7 +744,8 @@ button {
 
   .sectionHeader,
   .inputHeader,
-  .resultHeader {
+  .resultHeader,
+  .translationHeader {
     display: grid;
   }
 

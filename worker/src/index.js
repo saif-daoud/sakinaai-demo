@@ -37,7 +37,7 @@ const MODEL_REGISTRY = {
   },
   gemma4: {
     provider: "openrouter",
-    model: "google/gemma-4-31b-it:free",
+    model: "google/gemma-4-31b-it",
     compact_default: true,
     translate_with_fanar: false,
   },
@@ -99,19 +99,19 @@ const MODEL_REGISTRY = {
     system_prompt: "You are a careful medical documentation assistant. Produce faithful clinical notes from the transcript only.",
   },
   gpt4_1: {
-    provider: "openrouter",
-    model: "openai/gpt-4.1",
+    provider: "azure",
+    model: "gpt-4.1",
     min_smoke_tokens: 16,
     translate_with_fanar: true,
   },
   deepseek_v32: {
-    provider: "openrouter",
-    model: "deepseek/deepseek-v3.2",
+    provider: "openai_compatible",
+    model: "DeepSeek-V3.2",
     translate_with_fanar: true,
   },
   llama_33_70b: {
-    provider: "openrouter",
-    model: "meta-llama/llama-3.3-70b-instruct",
+    provider: "openai_compatible",
+    model: "Llama-3.3-70B-Instruct",
     translate_with_fanar: true,
   },
 };
@@ -369,11 +369,86 @@ function containsArabic(text) {
   return ARABIC_RE.test(String(text || ""));
 }
 
-function resolveModel(modelKey) {
+function parseDedicatedHfRoutes(env) {
+  const raw = String(env.HF_DEDICATED_ENDPOINTS || "").trim();
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    throw new Error("HF_DEDICATED_ENDPOINTS must be a JSON object keyed by model key");
+  }
+}
+
+function dedicatedHfRoute(env, modelKey) {
+  const value = parseDedicatedHfRoutes(env)[modelKey];
+  if (!value) return null;
+  if (typeof value === "string") return { endpoint: value };
+  if (typeof value !== "object" || Array.isArray(value)) return null;
+  const endpoint = String(value.endpoint || value.url || "").trim();
+  return endpoint
+    ? {
+        endpoint,
+        model: String(value.model || "").trim(),
+        task: String(value.task || "").trim(),
+      }
+    : null;
+}
+
+function providerLabel(provider) {
+  return {
+    fanar: "Fanar API",
+    openrouter: "OpenRouter",
+    hf: "Hugging Face",
+    hf_dedicated: "Hugging Face Endpoint",
+    azure: "Azure OpenAI",
+    openai_compatible: "Azure AI / OpenAI compatible",
+  }[provider] || provider;
+}
+
+function publicModelRegistry(env) {
+  return Object.fromEntries(
+    Object.entries(MODEL_REGISTRY).map(([key, config]) => {
+      const dedicated = config.disabled_reason ? dedicatedHfRoute(env, key) : null;
+      const provider = dedicated ? "hf_dedicated" : config.provider;
+      const dedicatedHasCredentials = Boolean(String(env.HF_DEDICATED_API_KEY || env.HF_API || "").trim());
+      const dedicatedAvailable = Boolean(dedicated && dedicatedHasCredentials);
+      return [
+        key,
+        {
+          available: !config.disabled_reason || dedicatedAvailable,
+          provider,
+          provider_label: providerLabel(provider),
+          unavailable_reason: dedicatedAvailable
+            ? ""
+            : dedicated && !dedicatedHasCredentials
+              ? "A dedicated endpoint is configured, but HF_DEDICATED_API_KEY/HF_API is missing."
+              : config.disabled_reason || "",
+        },
+      ];
+    }),
+  );
+}
+
+function resolveModel(modelKey, env) {
   const key = cleanText(modelKey, 80);
   const config = MODEL_REGISTRY[key];
   if (!config) throw new Error(`Unknown model: ${modelKey}`);
-  if (config.disabled_reason) throw new Error(config.disabled_reason);
+  if (config.disabled_reason) {
+    const dedicated = dedicatedHfRoute(env, key);
+    if (!dedicated) throw new Error(config.disabled_reason);
+    return [
+      key,
+      {
+        ...config,
+        provider: "hf_dedicated",
+        model: dedicated.model || config.model,
+        endpoint: dedicated.endpoint,
+        hf_task: dedicated.task || config.hf_task || "chat-completion",
+        disabled_reason: undefined,
+      },
+    ];
+  }
   return [key, config];
 }
 
@@ -447,6 +522,7 @@ ${schemaText}
     2. Medical/clinical notes using a SOAP template: Subjective, Objective, Assessment, Plan.
 
     Strict rules:
+    - Read every turn between TRANSCRIPT_START and TRANSCRIPT_END before writing the note.
     - Output valid JSON only. Do not include markdown, comments, or extra text.
     - Use English in the output.
     - Do not invent facts that are not present in the transcript.
@@ -461,9 +537,11 @@ ${schemaText}
 
     Source file: ${sourceFile}
 
-    ${transcriptLanguage} transcript:
-    
+    ${transcriptLanguage} transcript (${transcript.length} characters):
+
+    TRANSCRIPT_START
     ${transcript}
+    TRANSCRIPT_END
     
     `.trim();
 }
@@ -489,10 +567,22 @@ function chatPayload({ model, chatMessages, maxTokens, temperature, jsonMode }) 
 
 function splitKeys(value) {
   if (!value) return [];
-  return String(value)
+  if (Array.isArray(value)) return [...new Set(value.map((item) => String(item).trim()).filter(Boolean))];
+
+  const raw = String(value).trim();
+  if (raw.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return splitKeys(parsed);
+    } catch {
+      // Fall through to newline/comma parsing for a hand-written list.
+    }
+  }
+
+  return [...new Set(raw
     .split(/[\n,;]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
+    .map((item) => item.trim().replace(/^[-*]\s+/, "").replace(/^["']|["']$/g, ""))
+    .filter(Boolean))];
 }
 
 function splitModelProvider(model, defaultProvider = "") {
@@ -606,6 +696,7 @@ async function callOpenRouter(env, { model, chatMessages, maxTokens = 2048, temp
       "X-OpenRouter-Title": "SakinaAI Demo",
     };
 
+    let requestError = null;
     try {
       const data = await fetchJson(OPENROUTER_CHAT_URL, { method: "POST", headers, body: JSON.stringify(payload) }, "OpenRouter");
       return extractChatContent(data, "OpenRouter");
@@ -613,19 +704,137 @@ async function callOpenRouter(env, { model, chatMessages, maxTokens = 2048, temp
       if (jsonMode && responseFormatUnsupported(error)) {
         const retryPayload = { ...payload };
         delete retryPayload.response_format;
-        const data = await fetchJson(OPENROUTER_CHAT_URL, { method: "POST", headers, body: JSON.stringify(retryPayload) }, "OpenRouter");
-        return extractChatContent(data, "OpenRouter");
+        try {
+          const data = await fetchJson(OPENROUTER_CHAT_URL, { method: "POST", headers, body: JSON.stringify(retryPayload) }, "OpenRouter");
+          return extractChatContent(data, "OpenRouter");
+        } catch (retryError) {
+          requestError = retryError;
+        }
+      } else {
+        requestError = error;
       }
 
-      if (openRouterKeyError(error)) {
-        lastError = error;
+      if (openRouterKeyError(requestError)) {
+        lastError = requestError;
         continue;
       }
-      throw error;
+      throw requestError;
     }
   }
 
-  throw new Error(`All configured OpenRouter API keys failed or are exhausted. Last error: ${lastError?.message || "unknown"}`);
+  throw new Error(`All ${keys.length} configured OpenRouter API keys failed or are exhausted. Last error: ${lastError?.message || "unknown"}`);
+}
+
+function chatCompletionsUrl(endpoint) {
+  const base = String(endpoint || "").trim().replace(/\/+$/, "");
+  if (!base) return "";
+  return /\/chat\/completions$/i.test(base) ? base : `${base}/chat/completions`;
+}
+
+function azureChatCompletionsUrl(endpoint, deployment, apiVersion) {
+  const base = String(endpoint || "").trim().replace(/\/+$/, "");
+  if (!base) return "";
+  const path = /\/openai\/deployments\//i.test(base)
+    ? base
+    : `${base}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions`;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}api-version=${encodeURIComponent(apiVersion)}`;
+}
+
+function dedicatedHfUrl(endpoint, hfTask) {
+  const base = String(endpoint || "").trim().replace(/\/+$/, "");
+  if (!base) return "";
+  const completionTask = ["text-generation", "completion", "completions"].includes(hfTask);
+  if (completionTask && /\/completions$/i.test(base) && !/\/chat\/completions$/i.test(base)) return base;
+  if (!completionTask && /\/chat\/completions$/i.test(base)) return base;
+  const suffix = completionTask ? "completions" : "chat/completions";
+  return /\/v1$/i.test(base) ? `${base}/${suffix}` : `${base}/v1/${suffix}`;
+}
+
+async function callAzureOpenAI(env, { model, chatMessages, maxTokens = 2048, temperature = 0, jsonMode = false }) {
+  if (!env.AZURE_OPENAI_ENDPOINT) throw new Error("AZURE_OPENAI_ENDPOINT Worker secret is missing");
+  if (!env.AZURE_OPENAI_API_KEY) throw new Error("AZURE_OPENAI_API_KEY Worker secret is missing");
+
+  const deployment = String(env.AZURE_OPENAI_DEPLOYMENT || model || "").trim();
+  if (!deployment) throw new Error("AZURE_OPENAI_DEPLOYMENT Worker secret is missing");
+
+  const apiVersion = String(env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview").trim();
+  const url = azureChatCompletionsUrl(env.AZURE_OPENAI_ENDPOINT, deployment, apiVersion);
+  const headers = {
+    "api-key": env.AZURE_OPENAI_API_KEY,
+    "Content-Type": "application/json",
+  };
+  const payload = chatPayload({ model: deployment, chatMessages, maxTokens, temperature, jsonMode });
+
+  try {
+    const data = await fetchJson(url, { method: "POST", headers, body: JSON.stringify(payload) }, "Azure OpenAI");
+    return extractChatContent(data, "Azure OpenAI");
+  } catch (error) {
+    if (jsonMode && responseFormatUnsupported(error)) {
+      delete payload.response_format;
+      const data = await fetchJson(url, { method: "POST", headers, body: JSON.stringify(payload) }, "Azure OpenAI");
+      return extractChatContent(data, "Azure OpenAI");
+    }
+    throw error;
+  }
+}
+
+async function callOpenAICompatible(env, { model, chatMessages, maxTokens = 2048, temperature = 0, jsonMode = false }) {
+  if (!env.OPENAI_COMPATIBLE_ENDPOINT) throw new Error("OPENAI_COMPATIBLE_ENDPOINT Worker secret is missing");
+  if (!env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY Worker secret is missing");
+
+  const url = chatCompletionsUrl(env.OPENAI_COMPATIBLE_ENDPOINT);
+  const headers = {
+    Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+    "Content-Type": "application/json",
+  };
+  const payload = chatPayload({ model, chatMessages, maxTokens, temperature, jsonMode });
+
+  try {
+    const data = await fetchJson(url, { method: "POST", headers, body: JSON.stringify(payload) }, "OpenAI-compatible endpoint");
+    return extractChatContent(data, "OpenAI-compatible endpoint");
+  } catch (error) {
+    if (jsonMode && responseFormatUnsupported(error)) {
+      delete payload.response_format;
+      const data = await fetchJson(url, { method: "POST", headers, body: JSON.stringify(payload) }, "OpenAI-compatible endpoint");
+      return extractChatContent(data, "OpenAI-compatible endpoint");
+    }
+    throw error;
+  }
+}
+
+async function callDedicatedHf(env, config, { chatMessages, maxTokens = 2048, temperature = 0, jsonMode = false }) {
+  const apiKey = String(env.HF_DEDICATED_API_KEY || env.HF_API || "").trim();
+  if (!apiKey) throw new Error("HF_DEDICATED_API_KEY or HF_API Worker secret is missing");
+
+  const hfTask = config.hf_task || "chat-completion";
+  const completionTask = ["text-generation", "completion", "completions"].includes(hfTask);
+  const url = dedicatedHfUrl(config.endpoint, hfTask);
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
+  };
+  const payload = completionTask
+    ? {
+        model: config.model,
+        prompt: flattenMessagesForCompletion(chatMessages),
+        max_tokens: maxTokens,
+        temperature,
+        stream: false,
+      }
+    : chatPayload({ model: config.model, chatMessages, maxTokens, temperature, jsonMode });
+
+  try {
+    const data = await fetchJson(url, { method: "POST", headers, body: JSON.stringify(payload) }, "Hugging Face dedicated endpoint");
+    return extractChatContent(data, "Hugging Face dedicated endpoint");
+  } catch (error) {
+    if (!completionTask && jsonMode && responseFormatUnsupported(error)) {
+      delete payload.response_format;
+      const data = await fetchJson(url, { method: "POST", headers, body: JSON.stringify(payload) }, "Hugging Face dedicated endpoint");
+      return extractChatContent(data, "Hugging Face dedicated endpoint");
+    }
+    throw error;
+  }
 }
 
 async function callHf(env, { model, chatMessages, maxTokens = 2048, temperature = 0, jsonMode = false, hfTask = "chat-completion" }) {
@@ -678,8 +887,17 @@ async function callModel(env, config, { chatMessages, maxTokens, temperature = 0
   if (config.provider === "openrouter") {
     return callOpenRouter(env, { model: config.model, chatMessages, maxTokens, temperature, jsonMode });
   }
+  if (config.provider === "azure") {
+    return callAzureOpenAI(env, { model: config.model, chatMessages, maxTokens, temperature, jsonMode });
+  }
+  if (config.provider === "openai_compatible") {
+    return callOpenAICompatible(env, { model: config.model, chatMessages, maxTokens, temperature, jsonMode });
+  }
   if (config.provider === "hf") {
     return callHf(env, { model: config.model, chatMessages, maxTokens, temperature, jsonMode, hfTask: config.hf_task || "chat-completion" });
+  }
+  if (config.provider === "hf_dedicated") {
+    return callDedicatedHf(env, config, { chatMessages, maxTokens, temperature, jsonMode });
   }
   throw new Error(`Unsupported provider: ${config.provider}`);
 }
@@ -709,13 +927,23 @@ function extractJsonObject(text) {
 }
 
 async function runGeneration(env, { transcript, inputName, modelKey }) {
-  const [resolvedKey, config] = resolveModel(modelKey);
+  const [resolvedKey, config] = resolveModel(modelKey, env);
   const sourceFile = cleanText(inputName || "uploaded_transcript.txt", 260) || "uploaded_transcript.txt";
   const originalHasArabic = containsArabic(transcript);
   const translatedWithFanar = Boolean(config.translate_with_fanar && originalHasArabic);
   const modelInput = translatedWithFanar ? await translateWithFanar(env, transcript, sourceFile) : transcript;
+  if (!modelInput.trim()) throw new Error("The model input is empty; generation was stopped before calling the selected model.");
+  if (translatedWithFanar && transcript.length >= 200) {
+    const minimumTranslationLength = Math.min(200, Math.ceil(transcript.length * 0.08));
+    if (modelInput.length < minimumTranslationLength) {
+      throw new Error(
+        `Fanar translation appears incomplete (${modelInput.length} characters for a ${transcript.length}-character transcript). Generation was stopped.`,
+      );
+    }
+  }
   const transcriptLanguage = translatedWithFanar ? "English" : originalHasArabic ? "Arabic" : "English";
   const prompt = buildSoapPrompt(modelInput, sourceFile, transcriptLanguage, Boolean(config.compact_default));
+  if (!prompt.includes(modelInput)) throw new Error("Internal context check failed: the transcript was not included in the model prompt.");
   const rawOutput = await callModel(env, config, {
     chatMessages: messages(prompt, config.system_prompt || ""),
     maxTokens: Number(env.SOAP_MAX_TOKENS || 4096),
@@ -733,6 +961,10 @@ async function runGeneration(env, { transcript, inputName, modelKey }) {
     model_name: config.model,
     provider: config.provider,
     translated_with_fanar: translatedWithFanar,
+    source_character_count: transcript.length,
+    model_input_character_count: modelInput.length,
+    source_sha256: await sha256Hex(transcript),
+    model_input_sha256: await sha256Hex(modelInput),
     note: "Generated by an LLM from a simulated transcript; requires human clinical review.",
   };
 
@@ -749,7 +981,7 @@ async function runGeneration(env, { transcript, inputName, modelKey }) {
 }
 
 async function runSmoke(env, modelKey, requestedMaxTokens = 2) {
-  const [resolvedKey, config] = resolveModel(modelKey);
+  const [resolvedKey, config] = resolveModel(modelKey, env);
   const maxTokens = Math.max(Number(requestedMaxTokens || 2), Number(config.min_smoke_tokens || 0));
   const text = await callModel(env, config, {
     chatMessages: messages("Reply with OK.", "You are a concise assistant."),
@@ -852,6 +1084,16 @@ async function stats(env) {
   };
 }
 
+export const testSupport = {
+  MODEL_REGISTRY,
+  buildSoapPrompt,
+  buildTranslationPrompt,
+  callModel,
+  publicModelRegistry,
+  runGeneration,
+  splitKeys,
+};
+
 export default {
   async fetch(request, env) {
     const origin = request.headers.get("Origin") || "";
@@ -877,7 +1119,7 @@ export default {
 
       if (path.endsWith("/api/models")) {
         const payload = await verifyToken(env, body.token);
-        return json({ ok: true, expert_id: payload.expert_uid, models: MODEL_REGISTRY }, 200, headers);
+        return json({ ok: true, expert_id: payload.expert_uid, models: publicModelRegistry(env) }, 200, headers);
       }
 
       if (path.endsWith("/api/history")) {

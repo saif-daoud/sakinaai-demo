@@ -44,8 +44,16 @@ jobs:
           ACCESS_CODE_HASH: ${{ secrets.ACCESS_CODE_HASH }}
           FANAR_API: ${{ secrets.FANAR_API }}
           HF_API: ${{ secrets.HF_API }}
+          HF_DEDICATED_API_KEY: ${{ secrets.HF_DEDICATED_API_KEY }}
+          HF_DEDICATED_ENDPOINTS: ${{ secrets.HF_DEDICATED_ENDPOINTS }}
           OPENROUTER_API_KEYS: ${{ secrets.OPENROUTER_API_KEYS }}
           API_KEYS: ${{ secrets.API_KEYS }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
+          AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_COMPATIBLE_ENDPOINT: ${{ secrets.OPENAI_COMPATIBLE_ENDPOINT }}
         run: |
           set +e
           set -u
@@ -123,7 +131,15 @@ jobs:
           put_secret ACCESS_CODE_HASHES "${EFFECTIVE_ACCESS_HASHES:-}"
           put_secret FANAR_API "${FANAR_API:-}"
           put_secret HF_API "${HF_API:-}"
+          put_secret HF_DEDICATED_API_KEY "${HF_DEDICATED_API_KEY:-}"
+          put_secret HF_DEDICATED_ENDPOINTS "${HF_DEDICATED_ENDPOINTS:-}"
           put_secret OPENROUTER_API_KEYS "${EFFECTIVE_OPENROUTER_KEYS:-}"
+          put_secret AZURE_OPENAI_API_KEY "${AZURE_OPENAI_API_KEY:-}"
+          put_secret AZURE_OPENAI_API_VERSION "${AZURE_OPENAI_API_VERSION:-}"
+          put_secret AZURE_OPENAI_DEPLOYMENT "${AZURE_OPENAI_DEPLOYMENT:-}"
+          put_secret AZURE_OPENAI_ENDPOINT "${AZURE_OPENAI_ENDPOINT:-}"
+          put_secret OPENAI_API_KEY "${OPENAI_API_KEY:-}"
+          put_secret OPENAI_COMPATIBLE_ENDPOINT "${OPENAI_COMPATIBLE_ENDPOINT:-}"
 
           (cd worker && npx wrangler d1 migrations apply "$DB_NAME" --remote)
           (cd worker && npx wrangler deploy 2>&1 | tee ../worker-deploy.log)
