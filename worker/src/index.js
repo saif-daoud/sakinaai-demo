@@ -252,18 +252,22 @@ async function makeExpertUid(email) {
 }
 
 function accessCodeHashes(env) {
-  const configured = String(env.ACCESS_CODE_HASHES || env.ACCESS_CODE_HASH || DEFAULT_ACCESS_CODE_HASH)
+  const configured = String(env.ACCESS_CODE_HASHES || env.ACCESS_CODE_HASH || "")
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
-  return configured.length ? configured : [DEFAULT_ACCESS_CODE_HASH];
+  if (configured.length) return configured;
+  if (String(env.ALLOW_DEFAULT_ACCESS_CODE || "") === "1") return [DEFAULT_ACCESS_CODE_HASH];
+  return [];
 }
 
 async function requireAccessCode(env, accessCode) {
   const code = String(accessCode || "").trim();
   if (!code) throw new Error("Missing access code");
+  const hashes = accessCodeHashes(env);
+  if (!hashes.length) throw new Error("Access code is not configured");
   const hash = await sha256Hex(code);
-  if (!accessCodeHashes(env).includes(hash)) throw new Error("Invalid access code");
+  if (!hashes.includes(hash)) throw new Error("Invalid access code");
 }
 
 async function upsertExpert(env, email) {
