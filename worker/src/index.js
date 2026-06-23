@@ -1064,7 +1064,13 @@ async function runGeneration(
     jsonMode: true,
   });
 
-  const parsed = extractJsonObject(rawOutput);
+  let parsed;
+  try {
+    parsed = extractJsonObject(rawOutput);
+  } catch (error) {
+    error.rawOutput = rawOutput;
+    throw error;
+  }
   parsed.metadata = {
     ...(parsed.metadata || {}),
     source_file: sourceFile,
@@ -1186,13 +1192,14 @@ async function updateGenerationCompleted(env, generationId, result) {
 }
 
 async function updateGenerationFailed(env, generationId, error) {
+  const rawOutput = cleanText(error?.rawOutput || "", Number(env.MAX_RAW_OUTPUT_CHARS || 240000)) || null;
   await env.DB
     .prepare(
       `UPDATE generations
-       SET status = 'failed', error = ?, completed_at = ?
+       SET status = 'failed', error = ?, raw_output = COALESCE(?, raw_output), completed_at = ?
        WHERE id = ?`,
     )
-    .bind(cleanText(error?.message || "Generation failed", 5000), new Date().toISOString(), generationId)
+    .bind(cleanText(error?.message || "Generation failed", 5000), rawOutput, new Date().toISOString(), generationId)
     .run();
 }
 
