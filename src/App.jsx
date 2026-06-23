@@ -24,7 +24,6 @@ import { containsArabic, copyText, downloadJson, downloadText, filenameSafe, for
 const STORAGE_KEYS = {
   token: "sakina_demo_token",
   expert: "sakina_demo_expert",
-  lastTranscript: "sakina_demo_last_transcript",
   lastModel: "sakina_demo_last_model",
   activeGeneration: "sakina_demo_active_generation",
 };
@@ -176,7 +175,7 @@ function App() {
   const [accessStatus, setAccessStatus] = useState("");
   const [accessBusy, setAccessBusy] = useState(false);
   const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem(STORAGE_KEYS.lastModel) || "fanar2");
-  const [transcript, setTranscript] = useState(() => localStorage.getItem(STORAGE_KEYS.lastTranscript) || "");
+  const [transcript, setTranscript] = useState("");
   const [inputName, setInputName] = useState("pasted-transcript.txt");
   const [generation, setGeneration] = useState(null);
   const [history, setHistory] = useState([]);
@@ -200,6 +199,7 @@ function App() {
 
   useEffect(() => {
     document.title = "SakinaAI SOAP Demo";
+    localStorage.removeItem("sakina_demo_last_transcript");
     return () => window.clearInterval(responseStreamTimerRef.current);
   }, []);
 
@@ -228,10 +228,6 @@ function App() {
   useEffect(() => {
     if (expert) saveJson(STORAGE_KEYS.expert, expert);
   }, [expert]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.lastTranscript, transcript);
-  }, [transcript]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.lastModel, selectedModel);
@@ -340,6 +336,8 @@ function App() {
     setHistory([]);
     setModelOptions(MODEL_OPTIONS);
     setActiveGenerationId("");
+    setTranscript("");
+    setInputName("pasted-transcript.txt");
   }
 
   function showGeneration(item, options = {}) {
@@ -364,7 +362,6 @@ function App() {
     );
     setShowPreparedTranslation(false);
     setSelectedModel(item.model_key || selectedModel);
-    if (item.transcript_text) setTranscript(item.transcript_text);
 
     if (item.status === "running") {
       setGeneration(nextGeneration);
