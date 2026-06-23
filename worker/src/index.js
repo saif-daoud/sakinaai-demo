@@ -405,7 +405,7 @@ function providerLabel(provider) {
     hf: "Hugging Face",
     hf_dedicated: "Hugging Face Endpoint",
     azure: "Azure OpenAI",
-    openai_compatible: "Azure AI / OpenAI compatible",
+    openai_compatible: "OpenAI",
   }[provider] || provider;
 }
 
