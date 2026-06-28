@@ -28,7 +28,17 @@ const STORAGE_KEYS = {
   activeGeneration: "sakina_demo_active_generation",
 };
 
-const MODEL_OPTIONS = [
+const HIDDEN_MODEL_KEYS = new Set([
+  "allam",
+  "falcon_h1",
+  "bimedix2_bi",
+  "bimedix2_hf",
+  "medgemma_4b",
+  "openbiollm_8b",
+  "biomistral_7b",
+]);
+
+const ALL_MODEL_OPTIONS = [
   { key: "fanar2", label: "Fanar C-2 27B", category: "non-medical", provider: "Fanar API", language: "Arabic direct", enabled: true },
   { key: "gemma4", label: "Gemma 4 31B", category: "non-medical", provider: "OpenRouter", language: "Arabic direct", enabled: true },
   { key: "acegpt", label: "AceGPT v2 8B", category: "non-medical", provider: "Hugging Face", language: "Arabic direct", enabled: true },
@@ -45,6 +55,8 @@ const MODEL_OPTIONS = [
   { key: "medgemma_4b", label: "MedGemma 4B", category: "medical", provider: "Hugging Face", language: "Fanar to English", enabled: false },
   { key: "biomistral_7b", label: "BioMistral 7B", category: "medical", provider: "Hugging Face", language: "Fanar to English", enabled: false },
 ];
+
+const MODEL_OPTIONS = ALL_MODEL_OPTIONS.filter((model) => !HIDDEN_MODEL_KEYS.has(model.key));
 
 const MODEL_GROUPS = [
   { key: "medical", label: "Medical models" },
@@ -69,7 +81,7 @@ function normalizeEmail(email) {
 }
 
 function modelLabel(key) {
-  return MODEL_OPTIONS.find((item) => item.key === key)?.label || key;
+  return ALL_MODEL_OPTIONS.find((item) => item.key === key)?.label || key;
 }
 
 function mergeRuntimeModels(runtimeModels) {
@@ -174,7 +186,10 @@ function App() {
   const [access, setAccess] = useState({ email: expert?.email || "", access_code: "" });
   const [accessStatus, setAccessStatus] = useState("");
   const [accessBusy, setAccessBusy] = useState(false);
-  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem(STORAGE_KEYS.lastModel) || "fanar2");
+  const [selectedModel, setSelectedModel] = useState(() => {
+    const storedModel = localStorage.getItem(STORAGE_KEYS.lastModel) || "";
+    return MODEL_OPTIONS.some((model) => model.key === storedModel) ? storedModel : "fanar2";
+  });
   const [transcript, setTranscript] = useState("");
   const [inputName, setInputName] = useState("pasted-transcript.txt");
   const [generation, setGeneration] = useState(null);
@@ -232,6 +247,12 @@ function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.lastModel, selectedModel);
   }, [selectedModel]);
+
+  useEffect(() => {
+    if (!modelOptions.some((model) => model.key === selectedModel)) {
+      setSelectedModel(modelOptions[0]?.key || "fanar2");
+    }
+  }, [modelOptions, selectedModel]);
 
   useEffect(() => {
     if (activeGenerationId) {
@@ -361,7 +382,9 @@ function App() {
         : null,
     );
     setShowPreparedTranslation(false);
-    setSelectedModel(item.model_key || selectedModel);
+    if (modelOptions.some((model) => model.key === item.model_key)) {
+      setSelectedModel(item.model_key);
+    }
 
     if (item.status === "running") {
       setGeneration(nextGeneration);

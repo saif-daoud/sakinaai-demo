@@ -19,6 +19,7 @@ const MODEL_REGISTRY = {
     provider: "hf",
     model: "humain-ai/ALLaM-7B-Instruct-preview",
     translate_with_fanar: false,
+    hidden: true,
     disabled_reason: "The exact Hugging Face repo is not currently served by an enabled Inference Provider.",
   },
   acegpt: {
@@ -31,6 +32,7 @@ const MODEL_REGISTRY = {
     provider: "hf",
     model: "tiiuae/Falcon-H1-3B-Instruct",
     translate_with_fanar: false,
+    hidden: true,
     disabled_reason: "The exact Hugging Face repo is not currently served by an enabled Inference Provider.",
   },
   gemma4: {
@@ -42,6 +44,7 @@ const MODEL_REGISTRY = {
     provider: "hf",
     model: "MBZUAI/BiMediX2-8B-Bi",
     translate_with_fanar: false,
+    hidden: true,
     disabled_reason: "The exact Hugging Face repo is not currently served by an enabled Inference Provider.",
     system_prompt: "You are a careful bilingual Arabic-English medical documentation assistant. Produce faithful clinical notes from the transcript only.",
   },
@@ -49,6 +52,7 @@ const MODEL_REGISTRY = {
     provider: "hf",
     model: "MBZUAI/BiMediX2-8B-hf",
     translate_with_fanar: true,
+    hidden: true,
     disabled_reason: "The exact Hugging Face repo is not currently served by an enabled Inference Provider.",
     system_prompt: "You are a careful medical documentation assistant. Produce faithful clinical notes from the transcript only.",
   },
@@ -56,6 +60,7 @@ const MODEL_REGISTRY = {
     provider: "hf",
     model: "google/medgemma-4b-it",
     translate_with_fanar: true,
+    hidden: true,
     disabled_reason: "The exact Hugging Face repo is not currently served by an enabled Inference Provider.",
     system_prompt: "You are a careful medical documentation assistant. Produce faithful clinical notes from the transcript only.",
   },
@@ -65,6 +70,8 @@ const MODEL_REGISTRY = {
     hf_task: "text-generation",
     chat_template: "llama3_instruct",
     translate_with_fanar: true,
+    hidden: true,
+    disabled_reason: "The model API responds, but it does not currently return parseable SOAP JSON.",
     system_prompt: "You are an expert healthcare and biomedical assistant. Use precise medical terminology while staying faithful to the transcript.",
   },
   med42_8b: {
@@ -80,6 +87,7 @@ const MODEL_REGISTRY = {
     provider: "hf",
     model: "BioMistral/BioMistral-7B",
     translate_with_fanar: true,
+    hidden: true,
     disabled_reason: "The exact Hugging Face repo is not currently served by an enabled Inference Provider.",
     system_prompt: "You are a careful biomedical documentation assistant. Produce faithful clinical notes from the transcript only.",
   },
@@ -338,25 +346,27 @@ function providerLabel(provider) {
 
 function publicModelRegistry(env) {
   return Object.fromEntries(
-    Object.entries(MODEL_REGISTRY).map(([key, config]) => {
-      const dedicated = config.disabled_reason ? dedicatedHfRoute(env, key) : null;
-      const provider = dedicated ? "hf_dedicated" : config.provider;
-      const dedicatedHasCredentials = Boolean(String(env.HF_DEDICATED_API_KEY || env.HF_API || "").trim());
-      const dedicatedAvailable = Boolean(dedicated && dedicatedHasCredentials);
-      return [
-        key,
-        {
-          available: !config.disabled_reason || dedicatedAvailable,
-          provider,
-          provider_label: providerLabel(provider),
-          unavailable_reason: dedicatedAvailable
-            ? ""
-            : dedicated && !dedicatedHasCredentials
-              ? "A dedicated endpoint is configured, but HF_DEDICATED_API_KEY/HF_API is missing."
-              : config.disabled_reason || "",
-        },
-      ];
-    }),
+    Object.entries(MODEL_REGISTRY)
+      .filter(([, config]) => !config.hidden)
+      .map(([key, config]) => {
+        const dedicated = config.disabled_reason ? dedicatedHfRoute(env, key) : null;
+        const provider = dedicated ? "hf_dedicated" : config.provider;
+        const dedicatedHasCredentials = Boolean(String(env.HF_DEDICATED_API_KEY || env.HF_API || "").trim());
+        const dedicatedAvailable = Boolean(dedicated && dedicatedHasCredentials);
+        return [
+          key,
+          {
+            available: !config.disabled_reason || dedicatedAvailable,
+            provider,
+            provider_label: providerLabel(provider),
+            unavailable_reason: dedicatedAvailable
+              ? ""
+              : dedicated && !dedicatedHasCredentials
+                ? "A dedicated endpoint is configured, but HF_DEDICATED_API_KEY/HF_API is missing."
+                : config.disabled_reason || "",
+          },
+        ];
+      }),
   );
 }
 
@@ -364,6 +374,7 @@ function resolveModel(modelKey, env) {
   const key = cleanText(modelKey, 80);
   const config = MODEL_REGISTRY[key];
   if (!config) throw new Error(`Unknown model: ${modelKey}`);
+  if (config.hidden) throw new Error("This model is not available in the demo right now.");
   if (config.disabled_reason) {
     const dedicated = dedicatedHfRoute(env, key);
     if (!dedicated) throw new Error(config.disabled_reason);

@@ -76,15 +76,29 @@ test("Gemma rotates through every newline-separated OpenRouter key on 429", asyn
   }
 });
 
-test("dedicated HF endpoint mappings enable only configured unavailable models", () => {
-  const unavailable = publicModelRegistry({});
-  assert.equal(unavailable.allam.available, false);
-  assert.equal(unavailable.medgemma_4b.available, false);
-
+test("hidden models are omitted from the public registry", async () => {
   const configured = publicModelRegistry(testEnv());
   for (const key of ["allam", "falcon_h1", "bimedix2_bi", "bimedix2_hf", "medgemma_4b", "biomistral_7b"]) {
-    assert.equal(configured[key].available, true, key);
-    assert.equal(configured[key].provider, "hf_dedicated", key);
+    assert.equal(configured[key], undefined, key);
+  }
+  assert.equal(configured.openbiollm_8b, undefined);
+  assert.equal(configured.med42_8b.available, true);
+  assert.equal(configured.jsl_medllama_8b.available, true);
+
+  await assert.rejects(
+    () => runGeneration(testEnv(), {
+      transcript: sourceTranscript,
+      inputName: "context-test.txt",
+      modelKey: "openbiollm_8b",
+    }),
+    /not available/,
+  );
+});
+
+test("dedicated HF endpoint mappings do not unmask hidden models", () => {
+  const configured = publicModelRegistry(testEnv());
+  for (const key of ["allam", "falcon_h1", "bimedix2_bi", "bimedix2_hf", "medgemma_4b", "biomistral_7b"]) {
+    assert.equal(configured[key], undefined, key);
   }
 });
 
@@ -106,7 +120,7 @@ test("every model route includes the session content used for generation", async
   };
 
   try {
-    for (const [modelKey, config] of Object.entries(MODEL_REGISTRY)) {
+    for (const [modelKey, config] of Object.entries(MODEL_REGISTRY).filter(([, item]) => !item.hidden)) {
       requests.length = 0;
       const result = await runGeneration(testEnv(), {
         transcript: sourceTranscript,
