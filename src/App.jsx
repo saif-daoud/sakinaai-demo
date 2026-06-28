@@ -21,12 +21,14 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiEnabled, postJSON, setApiBase } from "./api.js";
 import { SoapViewer, TranscriptPreview } from "./renderers.jsx";
+import { DEFAULT_NOTE_TEMPLATE_KEY, NOTE_TEMPLATE_OPTIONS, noteTemplateByKey } from "../shared/noteTemplates.js";
 import { containsArabic, copyText, downloadJson, downloadText, filenameSafe, formatTime, nowUtc, prettify } from "./utils.js";
 
 const STORAGE_KEYS = {
   token: "sakina_demo_token",
   expert: "sakina_demo_expert",
   lastModel: "sakina_demo_last_model",
+  lastTemplate: "sakina_demo_last_template",
   activeGeneration: "sakina_demo_active_generation",
 };
 
@@ -89,12 +91,14 @@ function modelLabel(key) {
 function templateLabelFromOutput(output) {
   const metadata = output?.metadata || {};
   const rawKey = metadata.template_key || String(metadata.template_file || "").replace(/\.txt$/i, "");
-  if (rawKey) return prettify(rawKey);
+  if (rawKey) return noteTemplateByKey(rawKey).label || prettify(rawKey);
   return output?.medical_notes_soap ? "SOAP Notes" : "Generated Note";
 }
 
 function templateLabelFromGeneration(item) {
-  return templateLabelFromOutput(parseHistoryOutput(item));
+  const outputLabel = templateLabelFromOutput(parseHistoryOutput(item));
+  if (outputLabel !== "Generated Note") return outputLabel;
+  return item?.template_label || noteTemplateByKey(item?.template_key || DEFAULT_NOTE_TEMPLATE_KEY).label;
 }
 
 function mergeRuntimeModels(runtimeModels) {
@@ -110,7 +114,7 @@ function mergeRuntimeModels(runtimeModels) {
   });
 }
 
-const GENERATION_FRIENDLY_ERROR = "We could not generate the SOAP note with the selected model. Please try again, or choose another model.";
+const GENERATION_FRIENDLY_ERROR = "We could not generate the selected clinical note with this model. Please try again, or choose another model.";
 const TRANSLATION_FRIENDLY_ERROR = "The transcript could not be translated right now. Please try again, or choose a model that accepts Arabic directly.";
 
 function isProblemStatus(text) {
@@ -140,6 +144,7 @@ function friendlyGenerationStatus(error) {
   if (!message) return GENERATION_FRIENDLY_ERROR;
   if (
     lower.includes("soap note")
+    || lower.includes("clinical note")
     || lower.includes("transcript")
     || lower.includes("session")
     || lower.includes("not available")
@@ -203,6 +208,10 @@ function App() {
     const storedModel = localStorage.getItem(STORAGE_KEYS.lastModel) || "";
     return MODEL_OPTIONS.some((model) => model.key === storedModel) ? storedModel : "fanar2";
   });
+  const [selectedTemplate, setSelectedTemplate] = useState(() => {
+    const storedTemplate = localStorage.getItem(STORAGE_KEYS.lastTemplate) || "";
+    return NOTE_TEMPLATE_OPTIONS.some((template) => template.key === storedTemplate) ? storedTemplate : DEFAULT_NOTE_TEMPLATE_KEY;
+  });
   const [transcript, setTranscript] = useState("");
   const [inputName, setInputName] = useState("pasted-transcript.txt");
   const [generation, setGeneration] = useState(null);
@@ -221,6 +230,7 @@ function App() {
   const [activeGenerationId, setActiveGenerationId] = useState(() => localStorage.getItem(STORAGE_KEYS.activeGeneration) || "");
   const [deletingHistoryId, setDeletingHistoryId] = useState("");
   const selectedModelInfo = useMemo(() => modelOptions.find((item) => item.key === selectedModel), [modelOptions, selectedModel]);
+  const selectedTemplateInfo = useMemo(() => noteTemplateByKey(selectedTemplate), [selectedTemplate]);
   const transcriptHasArabic = containsArabic(transcript);
   const requiresTranslation = selectedModelInfo?.language === "Fanar to English" && transcriptHasArabic;
   const canGenerate = apiEnabled() && token && transcript.trim() && selectedModelInfo?.enabled && !busy && !translationBusy;
@@ -262,6 +272,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.lastModel, selectedModel);
   }, [selectedModel]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.lastTemplate, selectedTemplate);
+  }, [selectedTemplate]);
 
   useEffect(() => {
     if (!modelOptions.some((model) => model.key === selectedModel)) {
@@ -402,11 +416,15 @@ function App() {
     if (modelOptions.some((model) => model.key === item.model_key)) {
       setSelectedModel(item.model_key);
     }
+    const historyTemplateKey = outputJson?.metadata?.template_key || item.template_key || DEFAULT_NOTE_TEMPLATE_KEY;
+    if (NOTE_TEMPLATE_OPTIONS.some((template) => template.key === historyTemplateKey)) {
+      setSelectedTemplate(historyTemplateKey);
+    }
 
     if (item.status === "running") {
       setGeneration(nextGeneration);
       setActiveGenerationId(item.id || "");
-      setStatus("SOAP generation is still running. You can leave this page and return later.");
+      setStatus(`${templateLabelFromGeneration(item)} generation is still running. You can leave this page and return later.`);
       return;
     }
 
@@ -538,7 +556,7 @@ function App() {
       );
       setPreparedTranslation(payload.translation || null);
       setShowPreparedTranslation(true);
-      setStatus("English translation ready. Review it, then generate the SOAP note.");
+      setStatus(`English translation ready. Review it, then generate ${selectedTemplateInfo.label}.`);
     } catch (error) {
       setStatus(friendlyTranslationStatus(error));
     } finally {
@@ -553,9 +571,9 @@ function App() {
     setStatus(
       requiresTranslation
         ? preparedTranslation
-          ? "Generating SOAP note from the reviewed English translation..."
-          : "Generating English translation with Fanar, then the SOAP note..."
-        : "Generating SOAP note...",
+          ? `Generating ${selectedTemplateInfo.label} from the reviewed English translation...`
+          : `Generating English translation with Fanar, then ${selectedTemplateInfo.label}...`
+        : `Generating ${selectedTemplateInfo.label}...`,
     );
     setGeneration(null);
     setShowTranslation(false);
@@ -567,6 +585,7 @@ function App() {
         {
           token,
           model_key: selectedModel,
+          template_key: selectedTemplate,
           transcript,
           input_name: inputName,
           page_url: window.location.href,
@@ -579,7 +598,7 @@ function App() {
       if (nextGeneration?.status === "running") {
         setActiveGenerationId(nextGeneration.id || "");
         setGeneration(nextGeneration);
-        setStatus("SOAP generation has started. You can leave this page and return later.");
+        setStatus(`${selectedTemplateInfo.label} generation has started. You can leave this page and return later.`);
         await refreshHistory();
         return;
       }
@@ -603,7 +622,8 @@ function App() {
 
   function exportCurrent() {
     if (!generation?.output_json) return;
-    downloadJson(`${filenameSafe(generation.model_key)}-${generation.id || "soap"}.json`, {
+    const templateKey = generation.template_key || generation.output_json?.metadata?.template_key || DEFAULT_NOTE_TEMPLATE_KEY;
+    downloadJson(`${filenameSafe(generation.model_key)}-${filenameSafe(templateKey)}-${generation.id || "note"}.json`, {
       exported_at_utc: nowUtc(),
       expert,
       generation,
@@ -678,14 +698,14 @@ function App() {
             <ShieldCheck size={24} />
           </div>
           <div>
-            <div className="brandTitle">SakinaAI SOAP Demo</div>
+            <div className="brandTitle">SakinaAI Notes Demo</div>
             <div className="brandSub">{expert.email}</div>
           </div>
         </div>
         <div className="topbarCenter">
           <div className="modelSummary">
             <span>{modelLabel(selectedModel)}</span>
-            <small>{selectedModelInfo?.provider} · {selectedModelInfo?.language}</small>
+            <small>{selectedTemplateInfo.label} · {selectedModelInfo?.provider} · {selectedModelInfo?.language}</small>
           </div>
         </div>
         <nav className="topbarActions" aria-label="Primary">
@@ -729,14 +749,40 @@ function App() {
                         title={model.enabled ? model.label : model.unavailableReason || "This repository has no live inference endpoint"}
                       >
                         <strong>{model.label}</strong>
-                        <span>{model.provider}</span>
-                        <small>{model.enabled ? model.language : "Dedicated endpoint required"}</small>
+                        <span>{model.provider} · {model.enabled ? model.language : "Dedicated endpoint required"}</span>
+                        {model.enabled && selectedModel === model.key && (
+                          <small className="templateHint">{selectedTemplateInfo.label}</small>
+                        )}
                       </button>
                     ))}
                   </div>
                 </section>
               ))}
             </div>
+          </section>
+
+          <section className="panelBlock">
+            <div className="sectionHeader">
+              <div>
+                <div className="eyebrow">Template</div>
+                <h2>Note type</h2>
+              </div>
+            </div>
+            <label className="selectField">
+              <span>Template</span>
+              <select
+                value={selectedTemplate}
+                onChange={(event) => {
+                  setSelectedTemplate(event.target.value);
+                  setGeneration(null);
+                  setShowSourceTranscript(false);
+                }}
+              >
+                {NOTE_TEMPLATE_OPTIONS.map((template) => (
+                  <option key={template.key} value={template.key}>{template.label}</option>
+                ))}
+              </select>
+            </label>
           </section>
 
           <section className="panelBlock historyPanel" ref={historyPanelRef} tabIndex={-1}>
@@ -847,7 +893,7 @@ function App() {
               )}
               <button className="primaryAction" type="button" disabled={!canGenerate} onClick={() => void generateSoap()}>
                 {busy ? <RefreshCw size={18} className="spin" /> : <Send size={18} />}
-                {busy ? "Generating..." : "Generate SOAP"}
+                {busy ? "Generating..." : "Generate note"}
               </button>
             </div>
           </section>

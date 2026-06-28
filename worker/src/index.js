@@ -1,3 +1,6 @@
+import { DEFAULT_NOTE_TEMPLATE_KEY, NOTE_TEMPLATE_OPTIONS } from "../../shared/noteTemplates.js";
+import { NOTE_PROMPT_TEMPLATES } from "./notePromptTemplates.js";
+
 const JSON_HEADERS = { "Content-Type": "application/json" };
 const TOKEN_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const DEFAULT_ACCESS_CODE_HASH = "a7f5fbabd1624ba763ed037a9b3ed7289cda4e739b06be222f6d3589cdba8a87";
@@ -457,6 +460,38 @@ function buildSoapPrompt(transcript, sourceFile, transcriptLanguage = "Arabic") 
     `.trim();
 }
 
+function resolveNoteTemplate(templateKey) {
+  const key = cleanText(templateKey || DEFAULT_NOTE_TEMPLATE_KEY, 120);
+  const template = NOTE_TEMPLATE_OPTIONS.find((item) => item.key === key);
+  if (!template) throw new Error(`Unknown note template: ${templateKey}`);
+  return template;
+}
+
+function safeNoteTemplateLabel(templateKey) {
+  return NOTE_TEMPLATE_OPTIONS.find((item) => item.key === templateKey)?.label || NOTE_TEMPLATE_OPTIONS[0].label;
+}
+
+function publicTemplateRegistry() {
+  return NOTE_TEMPLATE_OPTIONS.map(({ key, label }) => ({ key, label }));
+}
+
+function buildTemplatePrompt(template, transcript, sourceFile, transcriptLanguage = "Arabic") {
+  if (template.key === DEFAULT_NOTE_TEMPLATE_KEY) {
+    return buildSoapPrompt(transcript, sourceFile, transcriptLanguage);
+  }
+
+  const promptTemplate = NOTE_PROMPT_TEMPLATES[template.key]?.text;
+  if (!promptTemplate) throw new Error(`Prompt is not configured for template: ${template.key}`);
+
+  return promptTemplate
+    .replaceAll("{{TRANSCRIPT_LANGUAGE}}", transcriptLanguage)
+    .replaceAll("{{SESSION_TRANSCRIPT}}", transcript)
+    .replaceAll("{{SESSION_TRANSCRIPTS}}", transcript)
+    .replaceAll("{{SOURCE_FILE}}", sourceFile)
+    .replaceAll("{{TRANSCRIPT_CHARACTER_COUNT}}", String(transcript.length))
+    .replaceAll("{{JSON_SCHEMA}}", JSON.stringify(JSON_SCHEMA_EXAMPLE, null, 2));
+}
+
 function messages(prompt, systemPrompt = "") {
   const list = [];
   if (systemPrompt.trim()) list.push({ role: "system", content: systemPrompt.trim() });
@@ -603,16 +638,16 @@ function expertFacingGenerationError(error) {
   const lower = text.toLowerCase();
 
   if (lower.includes("transcript is empty")) {
-    return "Please add a transcript before generating the SOAP note.";
+    return "Please add a transcript before generating the clinical note.";
   }
-  if (lower.includes("generation queue") || lower.includes("start the soap generation")) {
-    return "We could not start the SOAP generation. Please try again.";
+  if (lower.includes("generation queue") || lower.includes("start the soap generation") || lower.includes("start the note generation")) {
+    return "We could not start the note generation. Please try again.";
   }
   if (lower.includes("unknown model") || lower.includes("unsupported provider") || lower.includes("not currently served") || lower.includes("not available")) {
     return "This model is not available in the demo right now. Please choose another model.";
   }
   if (lower.includes("model output") || lower.includes("non-json") || lower.includes("json")) {
-    return "The selected model did not produce a complete SOAP note. Please try again, or choose another model.";
+    return "The selected model did not produce a complete clinical note. Please try again, or choose another model.";
   }
   if (lower.includes("fanar") || lower.includes("translation")) {
     return "The transcript could not be translated right now. Please try again, or choose a model that accepts Arabic directly.";
@@ -624,7 +659,7 @@ function expertFacingGenerationError(error) {
     return "The selected model took too long to respond. Please try again, or choose another model.";
   }
 
-  return "We could not generate the SOAP note with the selected model. Please try again, or choose another model.";
+  return "We could not generate the selected clinical note with this model. Please try again, or choose another model.";
 }
 
 function expertFacingTranslationError(error) {
@@ -1004,9 +1039,10 @@ function extractJsonObject(text) {
 
 async function runGeneration(
   env,
-  { transcript, inputName, modelKey, pretranslatedTranscript = "", translationSourceSha256 = "" },
+  { transcript, inputName, modelKey, templateKey = DEFAULT_NOTE_TEMPLATE_KEY, pretranslatedTranscript = "", translationSourceSha256 = "" },
 ) {
   const [resolvedKey, config] = resolveModel(modelKey, env);
+  const template = resolveNoteTemplate(templateKey);
   const sourceFile = cleanText(inputName || "uploaded_transcript.txt", 260) || "uploaded_transcript.txt";
   const originalHasArabic = containsArabic(transcript);
   const translatedWithFanar = Boolean(config.translate_with_fanar && originalHasArabic);
@@ -1024,12 +1060,12 @@ async function runGeneration(
     : transcript;
   if (!modelInput.trim()) throw new Error("The model input is empty; generation was stopped before calling the selected model.");
   const transcriptLanguage = translatedWithFanar ? "English" : originalHasArabic ? "Arabic" : "English";
-  const prompt = buildSoapPrompt(modelInput, sourceFile, transcriptLanguage);
+  const prompt = buildTemplatePrompt(template, modelInput, sourceFile, transcriptLanguage);
   if (!prompt.includes(modelInput)) throw new Error("Internal context check failed: the transcript was not included in the model prompt.");
   const rawOutput = await callModel(env, config, {
     chatMessages: messages(prompt, config.system_prompt || ""),
-    maxTokens: Number(env.SOAP_MAX_TOKENS || 4096),
-    temperature: Number(env.SOAP_TEMPERATURE || 0),
+    maxTokens: Number(env.NOTE_MAX_TOKENS || env.SOAP_MAX_TOKENS || 4096),
+    temperature: Number(env.NOTE_TEMPERATURE || env.SOAP_TEMPERATURE || 0),
     jsonMode: true,
   });
 
@@ -1045,6 +1081,9 @@ async function runGeneration(
     source_file: sourceFile,
     language_of_source: transcriptLanguage,
     output_language: "English",
+    template_key: template.key,
+    template_label: template.label,
+    template_file: template.file,
     model_key: resolvedKey,
     model_name: config.model,
     provider: config.provider,
@@ -1061,6 +1100,8 @@ async function runGeneration(
     modelKey: resolvedKey,
     provider: config.provider,
     modelName: config.model,
+    templateKey: template.key,
+    templateLabel: template.label,
     inputLanguage: transcriptLanguage,
     translatedTranscript: translatedWithFanar ? modelInput : "",
     translatedWithFanar,
@@ -1091,10 +1132,10 @@ async function insertGeneration(env, row) {
   await env.DB
     .prepare(
       `INSERT INTO generations (
-        id, expert_uid, expert_email, model_key, provider, model_name, input_name,
+        id, expert_uid, expert_email, model_key, provider, model_name, template_key, template_label, input_name,
         input_language, transcript_text, translated_transcript, translated_with_fanar,
         output_json, raw_output, status, error, user_agent, page_url, created_at, completed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       row.id,
@@ -1103,6 +1144,8 @@ async function insertGeneration(env, row) {
       row.model_key,
       row.provider,
       row.model_name,
+      row.template_key,
+      row.template_label,
       row.input_name,
       row.input_language,
       row.transcript_text,
@@ -1126,7 +1169,7 @@ async function getGeneration(env, generationId) {
   return env.DB
     .prepare(
       `SELECT id, expert_uid, expert_email, model_key, provider, model_name,
-        input_name, input_language, transcript_text, translated_transcript,
+        template_key, template_label, input_name, input_language, transcript_text, translated_transcript,
         translated_with_fanar, output_json, raw_output, status, error,
         user_agent, page_url, created_at, completed_at
        FROM generations
@@ -1140,7 +1183,7 @@ async function updateGenerationCompleted(env, generationId, result) {
   await env.DB
     .prepare(
       `UPDATE generations
-       SET model_key = ?, provider = ?, model_name = ?, input_language = ?,
+       SET model_key = ?, provider = ?, model_name = ?, template_key = ?, template_label = ?, input_language = ?,
            translated_transcript = ?, translated_with_fanar = ?, output_json = ?,
            raw_output = ?, status = 'completed', error = NULL, completed_at = ?
        WHERE id = ?`,
@@ -1149,6 +1192,8 @@ async function updateGenerationCompleted(env, generationId, result) {
       result.modelKey,
       result.provider,
       result.modelName,
+      result.templateKey,
+      result.templateLabel,
       result.inputLanguage,
       result.translatedTranscript || null,
       result.translatedWithFanar ? 1 : 0,
@@ -1173,17 +1218,22 @@ async function updateGenerationFailed(env, generationId, error) {
 }
 
 function clientGeneration(row) {
+  const outputJson = typeof row.output_json === "string" && row.output_json ? JSON.parse(row.output_json) : row.output_json;
+  const outputMetadata = outputJson?.metadata || {};
+  const templateKey = outputMetadata.template_key || row.template_key || DEFAULT_NOTE_TEMPLATE_KEY;
   return {
     id: row.id,
     model_key: row.model_key,
     provider: row.provider,
     model_name: row.model_name,
+    template_key: templateKey,
+    template_label: outputMetadata.template_label || row.template_label || safeNoteTemplateLabel(templateKey),
     input_name: row.input_name,
     input_language: row.input_language,
     transcript_text: row.transcript_text,
     translated_transcript: row.translated_transcript,
     translated_with_fanar: Boolean(row.translated_with_fanar),
-    output_json: typeof row.output_json === "string" && row.output_json ? JSON.parse(row.output_json) : row.output_json,
+    output_json: outputJson,
     raw_output: row.raw_output,
     status: row.status,
     error: row.status === "failed" && row.error ? expertFacingGenerationError({ message: row.error }) : row.error,
@@ -1204,6 +1254,7 @@ async function processQueuedGeneration(env, job) {
       transcript: row.transcript_text,
       inputName: row.input_name || "uploaded_transcript.txt",
       modelKey: row.model_key,
+      templateKey: row.template_key || job.template_key || DEFAULT_NOTE_TEMPLATE_KEY,
       pretranslatedTranscript: row.translated_transcript || "",
       translationSourceSha256: cleanText(job.translation_source_sha256, 128),
     });
@@ -1217,7 +1268,7 @@ async function listHistory(env, expertUid) {
   const rows = await env.DB
     .prepare(
       `SELECT id, expert_uid, expert_email, model_key, provider, model_name,
-        input_name, input_language, transcript_text, translated_transcript,
+        template_key, template_label, input_name, input_language, transcript_text, translated_transcript,
         translated_with_fanar, output_json, raw_output, status, error,
         created_at, completed_at
        FROM generations
@@ -1264,9 +1315,11 @@ async function stats(env) {
 export const testSupport = {
   MODEL_REGISTRY,
   buildSoapPrompt,
+  buildTemplatePrompt,
   buildTranslationPrompt,
   callModel,
   publicModelRegistry,
+  publicTemplateRegistry,
   deleteHistoryItem,
   runGeneration,
   runTranslation,
@@ -1305,7 +1358,7 @@ export default {
 
       if (path.endsWith("/api/models")) {
         const payload = await verifyToken(env, body.token);
-        return json({ ok: true, expert_id: payload.expert_uid, models: publicModelRegistry(env) }, 200, headers);
+        return json({ ok: true, expert_id: payload.expert_uid, models: publicModelRegistry(env), templates: publicTemplateRegistry() }, 200, headers);
       }
 
       if (path.endsWith("/api/history")) {
@@ -1343,6 +1396,7 @@ export default {
         const payload = await verifyToken(env, body.token);
         const transcript = cleanText(body.transcript, Number(env.MAX_TRANSCRIPT_CHARS || 120000));
         const inputName = cleanText(body.input_name || "uploaded_transcript.txt", 260);
+        const template = resolveNoteTemplate(body.template_key || DEFAULT_NOTE_TEMPLATE_KEY);
         const pageUrl = cleanText(body.page_url, 1000);
         const pretranslatedTranscript = cleanText(
           body.translated_transcript,
@@ -1362,6 +1416,8 @@ export default {
           model_key: resolvedKey,
           provider: config.provider || "unknown",
           model_name: config.model || "unknown",
+          template_key: template.key,
+          template_label: template.label,
           input_name: inputName,
           input_language: config.translate_with_fanar && sourceHasArabic ? "English" : sourceHasArabic ? "Arabic" : "English",
           transcript_text: transcript,
@@ -1382,6 +1438,7 @@ export default {
           if (!env.GENERATION_QUEUE) throw new Error("Generation queue is not configured");
           await env.GENERATION_QUEUE.send({
             generation_id: generationId,
+            template_key: template.key,
             translation_source_sha256: translationSourceSha256,
           });
           return json({ ok: true, queued: true, generation: clientGeneration(row) }, 202, headers);

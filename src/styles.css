@@ -102,6 +102,34 @@ button {
   text-transform: uppercase;
 }
 
+.selectField {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  color: #4b5b70;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.selectField select {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: 0;
+  font-weight: 850;
+  text-transform: none;
+}
+
+.selectField select:focus {
+  border-color: rgba(47, 111, 223, 0.58);
+  box-shadow: 0 0 0 3px rgba(47, 111, 223, 0.13);
+}
+
 .inputWrap {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
@@ -496,6 +524,10 @@ button {
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
+}
+
+.modelCard .templateHint {
+  color: #0b5f59;
 }
 
 .workspace {

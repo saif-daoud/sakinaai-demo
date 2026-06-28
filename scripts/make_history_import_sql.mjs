@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import { noteTemplateByKey } from "../shared/noteTemplates.js";
 
 const outputDir = process.argv[2];
 const email = String(process.argv[3] || "saif.sedaoud@gmail.com").trim().toLowerCase();
@@ -66,6 +67,7 @@ ON CONFLICT(email) DO UPDATE SET last_seen_at = excluded.last_seen_at;`,
 successfulRows.forEach(({ template, payload }, index) => {
   const outputJson = payload.output_json;
   const modelKey = payload.model_key;
+  const templateInfo = noteTemplateByKey(template);
   const rowId = stableId(modelKey, template);
   const rawPath = payload.raw_output_file || join(outputDir, "raw", `${modelKey}__${template}.txt`);
   const rawOutput = existsSync(rawPath) ? readFileSync(rawPath, "utf8") : "";
@@ -75,11 +77,11 @@ successfulRows.forEach(({ template, payload }, index) => {
 
   lines.push(`INSERT INTO generations (
   id, expert_uid, expert_email, model_key, provider, model_name, input_name,
-  input_language, transcript_text, translated_transcript, translated_with_fanar,
+  template_key, template_label, input_language, transcript_text, translated_transcript, translated_with_fanar,
   output_json, raw_output, status, error, user_agent, page_url, created_at, completed_at
 ) VALUES (
   ${sql(rowId)}, ${sql(expertUid)}, ${sql(email)}, ${sql(modelKey)}, ${sql(payload.provider)}, ${sql(payload.model_name)}, ${sql(inputName)},
-  ${sql(payload.language_of_model_input)}, ${sql(transcript)}, ${translatedWithFanar ? sql(translation) : "NULL"}, ${translatedWithFanar ? 1 : 0},
+  ${sql(templateInfo.key)}, ${sql(templateInfo.label)}, ${sql(payload.language_of_model_input)}, ${sql(transcript)}, ${translatedWithFanar ? sql(translation) : "NULL"}, ${translatedWithFanar ? 1 : 0},
   ${sql(JSON.stringify(outputJson))}, ${sql(rawOutput)}, 'completed', NULL, 'Codex batch import', ${sql(`batch-import://${batchId}`)}, ${sql(createdAt)}, ${sql(createdAt)}
 );`);
 });
