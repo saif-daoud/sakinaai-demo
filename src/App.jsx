@@ -5,6 +5,7 @@ import {
   Cloud,
   Database,
   Download,
+  FileText,
   FileJson,
   KeyRound,
   Languages,
@@ -19,7 +20,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiEnabled, postJSON, setApiBase } from "./api.js";
-import { SoapViewer } from "./renderers.jsx";
+import { SoapViewer, TranscriptPreview } from "./renderers.jsx";
 import { containsArabic, copyText, downloadJson, downloadText, filenameSafe, formatTime, nowUtc, prettify } from "./utils.js";
 
 const STORAGE_KEYS = {
@@ -211,6 +212,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
   const [showTranslation, setShowTranslation] = useState(false);
+  const [showSourceTranscript, setShowSourceTranscript] = useState(false);
   const [preparedTranslation, setPreparedTranslation] = useState(null);
   const [showPreparedTranslation, setShowPreparedTranslation] = useState(false);
   const [translationBusy, setTranslationBusy] = useState(false);
@@ -363,6 +365,7 @@ function App() {
     setToken("");
     setGeneration(null);
     setShowTranslation(false);
+    setShowSourceTranscript(false);
     setPreparedTranslation(null);
     setShowPreparedTranslation(false);
     setResponseStreaming(false);
@@ -384,6 +387,7 @@ function App() {
     };
 
     setShowTranslation(false);
+    setShowSourceTranscript(false);
     setPreparedTranslation(
       item.translated_transcript
         ? {
@@ -462,6 +466,7 @@ function App() {
       if (generation?.id === item.id) {
         setGeneration(null);
         setShowTranslation(false);
+        setShowSourceTranscript(false);
         setPreparedTranslation(null);
         stopResponseStream();
       }
@@ -481,6 +486,7 @@ function App() {
     setGeneration(null);
     setPreparedTranslation(null);
     setShowPreparedTranslation(false);
+    setShowSourceTranscript(false);
   }
 
   function stopResponseStream() {
@@ -553,6 +559,7 @@ function App() {
     );
     setGeneration(null);
     setShowTranslation(false);
+    setShowSourceTranscript(false);
 
     try {
       const payload = await postJSON(
@@ -891,6 +898,18 @@ function App() {
                       {showTranslation ? "Hide translation" : "Show translation"}
                     </button>
                   )}
+                  {generation.transcript_text && (
+                    <button
+                      className="secondaryButton"
+                      type="button"
+                      aria-expanded={showSourceTranscript}
+                      aria-controls="generated-source-transcript"
+                      onClick={() => setShowSourceTranscript((current) => !current)}
+                    >
+                      <FileText size={17} />
+                      {showSourceTranscript ? "Hide transcript" : "Show transcript"}
+                    </button>
+                  )}
                   <button className="secondaryButton" type="button" onClick={() => void copyCurrent()}>
                     <Clipboard size={17} />
                     {copyStatus || "Copy JSON"}
@@ -912,6 +931,19 @@ function App() {
                     <span>{generation.translated_transcript.length.toLocaleString()} characters</span>
                   </div>
                   <pre className="translationText" dir="ltr">{generation.translated_transcript}</pre>
+                </section>
+              )}
+
+              {showSourceTranscript && generation.transcript_text && (
+                <section className="sourceTranscriptPanel" id="generated-source-transcript">
+                  <div className="translationHeader">
+                    <div>
+                      <div className="eyebrow">Source transcript</div>
+                      <h2>{generation.input_name || "Transcript used for this run"}</h2>
+                    </div>
+                    <span>{generation.transcript_text.length.toLocaleString()} characters</span>
+                  </div>
+                  <TranscriptPreview text={generation.transcript_text} />
                 </section>
               )}
 
