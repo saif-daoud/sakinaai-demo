@@ -410,9 +410,10 @@ Strict rules:
 
 Source file: ${sourceFile}
 
-Arabic transcript:
+TRANSCRIPT_START
 
 ${transcript}
+TRANSCRIPT_END
 `.trim();
 }
 
@@ -549,6 +550,13 @@ function parseLooseJson(text, label) {
         else if (char === "}") {
           depth -= 1;
           if (depth === 0) return JSON.parse(raw.slice(start, i + 1));
+        }
+      }
+      if (!inString && depth > 0) {
+        try {
+          return JSON.parse(`${raw.slice(start)}${"}".repeat(depth)}`);
+        } catch {
+          // Fall through to the clearer model-output error below.
         }
       }
     }
@@ -889,20 +897,74 @@ async function callModel(env, config, { chatMessages, maxTokens, temperature = 0
   throw new Error(`Unsupported provider: ${config.provider}`);
 }
 
-async function translateWithFanar(env, transcript, sourceFile) {
-  const prompt = buildTranslationPrompt(transcript, sourceFile);
-  return callFanar(env, {
-    model: env.FANAR_TRANSLATION_MODEL || "Fanar",
-    chatMessages: messages(prompt),
-    maxTokens: Number(env.TRANSLATION_MAX_TOKENS || 4096),
-    temperature: 0,
-    jsonMode: false,
+function splitTranscriptForTranslation(transcript, maxCharacters = 1600) {
+  const text = String(transcript || "");
+  if (text.length <= maxCharacters) return [text];
+
+  const chunks = [];
+  let current = "";
+  for (const line of text.split(/\r?\n/)) {
+    const next = current ? `${current}\n${line}` : line;
+    if (next.length > maxCharacters && current.trim()) {
+      chunks.push(current.trim());
+      current = line;
+    } else {
+      current = next;
+    }
+  }
+  if (current.trim()) chunks.push(current.trim());
+
+  return chunks.flatMap((chunk) => {
+    if (chunk.length <= maxCharacters) return [chunk];
+    const pieces = [];
+    for (let index = 0; index < chunk.length; index += maxCharacters) {
+      pieces.push(chunk.slice(index, index + maxCharacters));
+    }
+    return pieces;
   });
+}
+
+async function translateWithFanar(env, transcript, sourceFile) {
+  const chunks = splitTranscriptForTranslation(transcript, Number(env.TRANSLATION_CHUNK_CHARACTERS || 1600));
+  const translatedChunks = [];
+
+  for (let index = 0; index < chunks.length; index += 1) {
+    const chunkLabel = chunks.length > 1 ? `${sourceFile} chunk ${index + 1} of ${chunks.length}` : sourceFile;
+    const prompt = buildTranslationPrompt(chunks[index], chunkLabel);
+    const translatedChunk = await callFanar(env, {
+      model: env.FANAR_TRANSLATION_MODEL || "Fanar",
+      chatMessages: messages(
+        prompt,
+        "You are a faithful clinical Arabic-to-English translator. You only translate the provided transcript.",
+      ),
+      maxTokens: Number(env.TRANSLATION_CHUNK_MAX_TOKENS || env.TRANSLATION_MAX_TOKENS || 2048),
+      temperature: 0,
+      jsonMode: false,
+    });
+    translatedChunks.push(String(translatedChunk || "").trim());
+  }
+
+  return translatedChunks.join("\n\n");
+}
+
+function translationLooksUnrelated(transcript, translation) {
+  const source = String(transcript || "");
+  const translated = String(translation || "");
+  const sourceMentionsAi = /(الذكاء\s+الاصطناعي|ذكاء\s+اصطناعي|التعلم\s+الآلي|تعلم\s+آلي)/.test(source);
+  const translationMentionsAi = /\b(machine learning|artificial intelligence|ai)\b/i.test(translated);
+  if (translationMentionsAi && !sourceMentionsAi) return true;
+
+  const sourceHasClinicalSpeakers = /(المريضة|المريض|المعالج|المعالجة|الطبيب|الطبيبة)/.test(source);
+  const translationHasClinicalSpeakers = /\b(patient|client|therapist|clinician|doctor|counselor|counsellor)\b/i.test(translated);
+  return sourceHasClinicalSpeakers && !translationHasClinicalSpeakers;
 }
 
 function validateGeneratedTranslation(transcript, translation) {
   const translatedText = String(translation || "").trim();
   if (!translatedText) throw new Error("Fanar returned an empty translation.");
+  if (translationLooksUnrelated(transcript, translatedText)) {
+    throw new Error("Fanar translation appears unrelated to the uploaded transcript.");
+  }
   if (transcript.length >= 200) {
     const minimumTranslationLength = Math.min(200, Math.ceil(transcript.length * 0.08));
     if (translatedText.length < minimumTranslationLength) {
