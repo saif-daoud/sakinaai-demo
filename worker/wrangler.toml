@@ -6,7 +6,7 @@ workers_dev = true
 [[d1_databases]]
 binding = "DB"
 database_name = "sakinaai_demo"
-database_id = "replace-with-cloudflare-d1-database-id"
+database_id = "10db5831-6c02-43f1-b5fb-81ba6658b9af"
 
 [[queues.producers]]
 binding = "GENERATION_QUEUE"
