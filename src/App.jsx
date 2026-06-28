@@ -20,7 +20,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiEnabled, postJSON, setApiBase } from "./api.js";
 import { SoapViewer } from "./renderers.jsx";
-import { containsArabic, copyText, downloadJson, downloadText, filenameSafe, formatTime, nowUtc } from "./utils.js";
+import { containsArabic, copyText, downloadJson, downloadText, filenameSafe, formatTime, nowUtc, prettify } from "./utils.js";
 
 const STORAGE_KEYS = {
   token: "sakina_demo_token",
@@ -83,6 +83,17 @@ function normalizeEmail(email) {
 
 function modelLabel(key) {
   return ALL_MODEL_OPTIONS.find((item) => item.key === key)?.label || key;
+}
+
+function templateLabelFromOutput(output) {
+  const metadata = output?.metadata || {};
+  const rawKey = metadata.template_key || String(metadata.template_file || "").replace(/\.txt$/i, "");
+  if (rawKey) return prettify(rawKey);
+  return output?.medical_notes_soap ? "SOAP Notes" : "Generated Note";
+}
+
+function templateLabelFromGeneration(item) {
+  return templateLabelFromOutput(parseHistoryOutput(item));
 }
 
 function mergeRuntimeModels(runtimeModels) {
@@ -749,7 +760,7 @@ function App() {
                 >
                   <div className="historyItemText">
                     <strong>{modelLabel(item.model_key)}</strong>
-                    <span>{formatTime(item.created_at)}</span>
+                    <span>{templateLabelFromGeneration(item)} · {formatTime(item.created_at)}</span>
                     <small className={statusClass(item.status)}>{statusText(item.status)}</small>
                   </div>
                   <button
@@ -864,7 +875,7 @@ function App() {
             <section className="resultPanel">
               <div className="resultHeader">
                 <div>
-                  <div className="eyebrow">SOAP output</div>
+                  <div className="eyebrow">{templateLabelFromOutput(generation.output_json)}</div>
                   <h1>{modelLabel(generation.model_key)}</h1>
                 </div>
                 {!responseStreaming && <div className="headerActions">

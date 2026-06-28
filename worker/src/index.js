@@ -1223,7 +1223,7 @@ async function listHistory(env, expertUid) {
        FROM generations
        WHERE expert_uid = ?
        ORDER BY created_at DESC
-       LIMIT 30`,
+       LIMIT 100`,
     )
     .bind(expertUid)
     .all();

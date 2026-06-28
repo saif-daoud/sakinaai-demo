@@ -100,6 +100,9 @@ export function SoapViewer({ output }) {
     ["Assessment", soap.assessment],
     ["Plan", soap.plan],
   ].filter(([, value]) => value != null);
+  const genericEntries = Object.entries(payload)
+    .filter(([key]) => key !== "metadata" && key !== "medical_notes_soap" && key !== "conversation_summary")
+    .map(([key, value]) => [prettify(key), value]);
 
   return (
     <div className="outputViewer">
@@ -107,6 +110,9 @@ export function SoapViewer({ output }) {
         {payload.conversation_summary && <SoapSection title="Conversation Summary" value={payload.conversation_summary} />}
         {sectionEntries.map(([title, value]) => (
           <SoapSection key={title} title={title} value={value} defaultOpen={title !== "Objective"} />
+        ))}
+        {sectionEntries.length === 0 && genericEntries.map(([title, value], index) => (
+          <SoapSection key={`${title}-${index}`} title={title} value={value} defaultOpen={index < 2} />
         ))}
       </div>
     </div>
