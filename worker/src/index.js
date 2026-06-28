@@ -1172,6 +1172,20 @@ async function listHistory(env, expertUid) {
   }));
 }
 
+async function deleteHistoryItem(env, expertUid, generationId) {
+  const id = cleanText(generationId, 80);
+  const uid = cleanText(expertUid, 160);
+  if (!id) throw new Error("Missing history item");
+  if (!uid) throw new Error("Bad token");
+
+  const result = await env.DB
+    .prepare("DELETE FROM generations WHERE id = ? AND expert_uid = ?")
+    .bind(id, uid)
+    .run();
+
+  return Boolean(result?.meta?.changes || result?.changes);
+}
+
 async function stats(env) {
   const total = await env.DB.prepare("SELECT COUNT(*) AS n FROM generations").first();
   const completed = await env.DB.prepare("SELECT COUNT(*) AS n FROM generations WHERE status = 'completed'").first();
@@ -1191,6 +1205,7 @@ export const testSupport = {
   buildTranslationPrompt,
   callModel,
   publicModelRegistry,
+  deleteHistoryItem,
   runGeneration,
   runTranslation,
   processQueuedGeneration,
@@ -1234,6 +1249,12 @@ export default {
       if (path.endsWith("/api/history")) {
         const payload = await verifyToken(env, body.token);
         return json({ ok: true, generations: await listHistory(env, String(payload.expert_uid || "")) }, 200, headers);
+      }
+
+      if (path.endsWith("/api/history/delete")) {
+        const payload = await verifyToken(env, body.token);
+        const deleted = await deleteHistoryItem(env, String(payload.expert_uid || ""), body.generation_id || body.id);
+        return json({ ok: true, deleted }, 200, headers);
       }
 
       if (path.endsWith("/api/stats")) {

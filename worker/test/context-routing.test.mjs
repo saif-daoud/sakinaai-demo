@@ -6,6 +6,7 @@ import { testSupport } from "../src/index.js";
 const {
   MODEL_REGISTRY,
   callModel,
+  deleteHistoryItem,
   publicModelRegistry,
   runGeneration,
   runTranslation,
@@ -181,4 +182,29 @@ test("reviewed translation is reused without a second Fanar request", async () =
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("history deletion is scoped to the signed-in expert", async () => {
+  const observed = [];
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind(...args) {
+            observed.push({ sql, args });
+            return {
+              async run() {
+                return { meta: { changes: args[0] === "generation-1" && args[1] === "expert-a" ? 1 : 0 } };
+              },
+            };
+          },
+        };
+      },
+    },
+  };
+
+  assert.equal(await deleteHistoryItem(env, "expert-a", "generation-1"), true);
+  assert.equal(await deleteHistoryItem(env, "expert-b", "generation-1"), false);
+  assert.match(observed[0].sql, /WHERE id = \? AND expert_uid = \?/);
+  assert.deepEqual(observed[0].args, ["generation-1", "expert-a"]);
 });

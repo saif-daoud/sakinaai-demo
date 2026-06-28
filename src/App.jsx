@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Send,
   ShieldCheck,
+  Trash2,
   Upload,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -205,6 +206,7 @@ function App() {
   const [responseStreaming, setResponseStreaming] = useState(false);
   const [streamedResponse, setStreamedResponse] = useState("");
   const [activeGenerationId, setActiveGenerationId] = useState(() => localStorage.getItem(STORAGE_KEYS.activeGeneration) || "");
+  const [deletingHistoryId, setDeletingHistoryId] = useState("");
   const selectedModelInfo = useMemo(() => modelOptions.find((item) => item.key === selectedModel), [modelOptions, selectedModel]);
   const transcriptHasArabic = containsArabic(transcript);
   const requiresTranslation = selectedModelInfo?.language === "Fanar to English" && transcriptHasArabic;
@@ -433,6 +435,30 @@ function App() {
     } catch (error) {
       setStatus(`History unavailable: ${error?.message || "request failed"}`);
       return null;
+    }
+  }
+
+  async function deleteHistoryItem(event, item) {
+    event.stopPropagation();
+    if (!item?.id || !token || deletingHistoryId) return;
+    if (!window.confirm("Remove this saved run from your history?")) return;
+
+    try {
+      setDeletingHistoryId(item.id);
+      await postJSON("/api/history/delete", { token, generation_id: item.id }, { timeoutMs: 30000 });
+      setHistory((current) => current.filter((entry) => entry.id !== item.id));
+      if (activeGenerationId === item.id) setActiveGenerationId("");
+      if (generation?.id === item.id) {
+        setGeneration(null);
+        setShowTranslation(false);
+        setPreparedTranslation(null);
+        stopResponseStream();
+      }
+      setStatus("History item removed.");
+    } catch (error) {
+      setStatus(error?.message || "Could not remove the history item.");
+    } finally {
+      setDeletingHistoryId("");
     }
   }
 
@@ -708,16 +734,35 @@ function App() {
             <div className="historyList">
               {history.length === 0 && <div className="emptyState">No saved runs yet.</div>}
               {history.map((item) => (
-                <button
+                <div
                   key={item.id}
                   className={`historyItem ${item.status === "running" ? "running" : ""}`}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => showGeneration(item)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      showGeneration(item);
+                    }
+                  }}
                 >
-                  <strong>{modelLabel(item.model_key)}</strong>
-                  <span>{formatTime(item.created_at)}</span>
-                  <small className={statusClass(item.status)}>{statusText(item.status)}</small>
-                </button>
+                  <div className="historyItemText">
+                    <strong>{modelLabel(item.model_key)}</strong>
+                    <span>{formatTime(item.created_at)}</span>
+                    <small className={statusClass(item.status)}>{statusText(item.status)}</small>
+                  </div>
+                  <button
+                    className="historyDeleteButton"
+                    type="button"
+                    disabled={deletingHistoryId === item.id}
+                    onClick={(event) => void deleteHistoryItem(event, item)}
+                    title="Remove from history"
+                    aria-label={`Remove ${modelLabel(item.model_key)} run from history`}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               ))}
             </div>
           </section>

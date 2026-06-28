@@ -419,10 +419,12 @@ button {
 .modelCard,
 .historyItem {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  align-items: center;
   justify-items: start;
   justify-content: stretch;
   align-content: center;
-  gap: 3px;
+  gap: 10px;
   width: 100%;
   min-height: 68px;
   padding: 10px 12px;
@@ -430,6 +432,42 @@ button {
   background: #f7f9fc;
   border: 1px solid var(--line);
   text-align: left;
+}
+
+.historyItem:focus-visible {
+  border-color: rgba(47, 111, 223, 0.58);
+  box-shadow: 0 0 0 3px rgba(47, 111, 223, 0.13);
+  outline: 0;
+}
+
+.historyItemText {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.historyDeleteButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  color: #526277;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.historyDeleteButton:hover {
+  color: var(--red);
+  border-color: rgba(183, 35, 35, 0.32);
+  background: #fff5f5;
+}
+
+.historyDeleteButton:disabled {
+  cursor: progress;
+  opacity: 0.55;
 }
 
 .modelCard.active {
