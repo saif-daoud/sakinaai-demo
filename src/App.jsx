@@ -387,7 +387,7 @@ function App() {
     };
 
     setShowTranslation(false);
-    setShowSourceTranscript(false);
+    setShowSourceTranscript(Boolean(item.transcript_text));
     setPreparedTranslation(
       item.translated_transcript
         ? {
