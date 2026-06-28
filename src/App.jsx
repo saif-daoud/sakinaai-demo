@@ -172,14 +172,33 @@ function friendlyTranslationStatus(error) {
   return TRANSLATION_FRIENDLY_ERROR;
 }
 
+function parseJsonMaybeString(value) {
+  let current = value;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (typeof current !== "string") return current;
+    const trimmed = current.trim();
+    if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return current;
+    try {
+      current = JSON.parse(trimmed);
+    } catch {
+      return current;
+    }
+  }
+  return current;
+}
+
 function parseHistoryOutput(item) {
   if (!item?.output_json) return null;
-  if (typeof item.output_json !== "string") return item.output_json;
-  try {
-    return JSON.parse(item.output_json);
-  } catch {
-    return null;
-  }
+  const outputJson = parseJsonMaybeString(item.output_json);
+  return outputJson && typeof outputJson === "object" ? outputJson : null;
+}
+
+function normalizeGeneration(item) {
+  if (!item) return item;
+  return {
+    ...item,
+    output_json: parseHistoryOutput(item),
+  };
 }
 
 function statusText(status) {
@@ -462,7 +481,7 @@ function App() {
     if (!explicitToken || !apiEnabled()) return null;
     try {
       const payload = await postJSON("/api/history", { token: explicitToken }, { timeoutMs: 30000 });
-      const nextHistory = Array.isArray(payload.generations) ? payload.generations : [];
+      const nextHistory = Array.isArray(payload.generations) ? payload.generations.map(normalizeGeneration) : [];
       setHistory(nextHistory);
       return nextHistory;
     } catch (error) {
@@ -594,7 +613,7 @@ function App() {
         },
         { timeoutMs: 240000 },
       );
-      const nextGeneration = payload.generation;
+      const nextGeneration = normalizeGeneration(payload.generation);
       if (nextGeneration?.status === "running") {
         setActiveGenerationId(nextGeneration.id || "");
         setGeneration(nextGeneration);

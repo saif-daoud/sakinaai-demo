@@ -562,10 +562,17 @@ function flattenMessagesForCompletion(chatMessages, chatTemplate = "") {
   return `${chatMessages.map((message) => `${String(message.role || "user").toUpperCase()}:\n${messageContentText(message.content)}`).join("\n\n")}\n\nASSISTANT:`;
 }
 
-function parseLooseJson(text, label) {
+function parseLooseJson(text, label, depth = 0) {
   const raw = String(text || "").trim();
+  const unwrap = (value) => {
+    if (typeof value !== "string" || depth >= 2) return value;
+    const nested = value.trim();
+    if (!nested.startsWith("{") && !nested.startsWith("[")) return value;
+    return parseLooseJson(nested, label, depth + 1);
+  };
+
   try {
-    return JSON.parse(raw);
+    return unwrap(JSON.parse(raw));
   } catch {
     const start = raw.indexOf("{");
     if (start !== -1) {
@@ -584,18 +591,27 @@ function parseLooseJson(text, label) {
         else if (char === "{") depth += 1;
         else if (char === "}") {
           depth -= 1;
-          if (depth === 0) return JSON.parse(raw.slice(start, i + 1));
+          if (depth === 0) return unwrap(JSON.parse(raw.slice(start, i + 1)));
         }
       }
       if (!inString && depth > 0) {
         try {
-          return JSON.parse(`${raw.slice(start)}${"}".repeat(depth)}`);
+          return unwrap(JSON.parse(`${raw.slice(start)}${"}".repeat(depth)}`));
         } catch {
           // Fall through to the clearer model-output error below.
         }
       }
     }
     throw new Error(`${label} returned non-JSON content: ${raw.slice(0, 500)}`);
+  }
+}
+
+function parseStoredOutputJson(value) {
+  if (!value || typeof value !== "string") return value;
+  try {
+    return parseLooseJson(value, "Stored model output");
+  } catch {
+    return null;
   }
 }
 
@@ -1218,7 +1234,7 @@ async function updateGenerationFailed(env, generationId, error) {
 }
 
 function clientGeneration(row) {
-  const outputJson = typeof row.output_json === "string" && row.output_json ? JSON.parse(row.output_json) : row.output_json;
+  const outputJson = parseStoredOutputJson(row.output_json);
   const outputMetadata = outputJson?.metadata || {};
   const templateKey = outputMetadata.template_key || row.template_key || DEFAULT_NOTE_TEMPLATE_KEY;
   return {

@@ -184,6 +184,29 @@ test("reviewed translation is reused without a second Fanar request", async () =
   }
 });
 
+test("double-encoded model JSON is unwrapped before storing output", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(
+    JSON.stringify({ choices: [{ message: { content: JSON.stringify(soapOutput) } }] }),
+    { status: 200 },
+  );
+
+  try {
+    const result = await runGeneration(testEnv(), {
+      transcript: sourceTranscript,
+      inputName: "double-encoded-test.txt",
+      modelKey: "gpt4_1",
+      pretranslatedTranscript: translatedTranscript,
+      translationSourceSha256: createHash("sha256").update(sourceTranscript).digest("hex"),
+    });
+    assert.equal(result.outputJson.conversation_summary, "The patient described anxiety before the wedding.");
+    assert.ok(result.outputJson.medical_notes_soap);
+    assert.equal(result.outputJson.metadata.model_key, "gpt4_1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("history deletion is scoped to the signed-in expert", async () => {
   const observed = [];
   const env = {
